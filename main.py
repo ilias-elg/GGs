@@ -143,3 +143,6 @@ async def on_message(message: discord.Message):
 
     # ── Full conversational AI ───────────────────────────────────────────────
     await manager.handle(message, content)
+
+# Start the bot
+bot.run(DISCORD_TOKEN)
