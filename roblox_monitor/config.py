@@ -1,0 +1,37 @@
+import os
+
+# Groups to monitor
+MONITORED_GROUPS = {
+    485588074: "TSB Air",
+    592750791: "TSB Earth",
+    1029776236: "TSB Water"
+}
+
+# Scanning and Syncing Intervals
+PRESENCE_SCAN_INTERVAL = 20  # seconds
+GROUP_SYNC_INTERVAL = 900  # seconds (15 minutes)
+
+# Spike Detection
+SPIKE_WINDOW_SECONDS = 180  # 3 minutes
+
+# Alert Thresholds (Absolute number of new players in window)
+ALERT_THRESHOLD_INFO = 10
+ALERT_THRESHOLD_WARNING = 20
+ALERT_THRESHOLD_HIGH = 30
+ALERT_THRESHOLD_CRITICAL = 50
+
+# Alert Thresholds (Relative % increase in window)
+ALERT_PERCENT_INFO = 2.0     # 200%
+ALERT_PERCENT_WARNING = 3.0  # 300%
+ALERT_PERCENT_HIGH = 4.0     # 400%
+ALERT_PERCENT_CRITICAL = 5.0 # 500%
+
+# Cooldown
+ALERT_COOLDOWN_MINUTES = 10
+
+# Database Retention (Keep disk usage low due to 512MB limit)
+PRESENCE_HISTORY_RETENTION_DAYS = 3
+ALERT_HISTORY_RETENTION_DAYS = 7
+
+# Discord Config
+ALERTS_CHANNEL_ID = os.getenv("ALERTS_CHANNEL_ID") # Can be set in .env
