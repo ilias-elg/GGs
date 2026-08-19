@@ -10,7 +10,7 @@ from .config import (
     MONITORED_GROUPS, PRESENCE_SCAN_INTERVAL, GROUP_SYNC_INTERVAL,
     SPIKE_WINDOW_SECONDS, ALERT_THRESHOLD_INFO, ALERT_THRESHOLD_WARNING,
     ALERT_THRESHOLD_HIGH, ALERT_THRESHOLD_CRITICAL, ALERT_PERCENT_INFO,
-    ALERT_COOLDOWN_MINUTES, ALERTS_CHANNEL_ID
+    ALERT_COOLDOWN_MINUTES, ALERTS_CHANNEL_ID, ALERT_USER_ID
 )
 from .db import DB_PATH, cleanup_old_data
 from .client import RobloxClient
@@ -305,5 +305,12 @@ class MonitorTasks:
                 await channel.send(embed=embed)
             else:
                 logger.warning("Alerts channel not found!")
-        else:
-            logger.warning("ALERTS_CHANNEL_ID not set, skipping discord message.")
+                
+        if ALERT_USER_ID:
+            try:
+                user_id = int(ALERT_USER_ID)
+                user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+                if user:
+                    await user.send(embed=embed)
+            except Exception as e:
+                logger.error(f"Failed to DM alert to {ALERT_USER_ID}: {e}")

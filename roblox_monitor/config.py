@@ -33,5 +33,7 @@ ALERT_COOLDOWN_MINUTES = 10
 PRESENCE_HISTORY_RETENTION_DAYS = 3
 ALERT_HISTORY_RETENTION_DAYS = 7
 
-# Discord Config
-ALERTS_CHANNEL_ID = os.getenv("ALERTS_CHANNEL_ID") # Can be set in .env
+# The Discord channel ID where spike alerts are sent
+ALERTS_CHANNEL_ID = os.getenv('ALERTS_CHANNEL_ID')
+# Optional: User ID to DM when a spike occurs
+ALERT_USER_ID = os.getenv('ALERT_USER_ID') # Can be set in .env
