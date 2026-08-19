@@ -6,16 +6,16 @@ from datetime import datetime, timezone
 from .config import MONITORED_GROUPS
 from .db import DB_PATH
 
-DASHBOARD_COLOR = 0xC0392B  # Vivid crimson red
+DASHBOARD_COLOR = 0xC0392B  # Vivid crimson
 
-RANK_EMOJI = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"]
 ALERT_ICONS = {"INFO": "🟡", "WARNING": "🟠", "HIGH": "🔴", "CRITICAL": "💀"}
 
-GROUP_EMOJI = {
-    "TSB Air":   "🌪️",
-    "TSB Earth": "🌍",
-    "TSB Water": "🌊",
-}
+W = 54  # target line width inside code blocks
+
+
+def _bar(ratio: float, length: int = 14) -> str:
+    filled = min(int(ratio * length), length)
+    return "█" * filled + "░" * (length - filled)
 
 
 async def _latest_ts(db) -> int | None:
@@ -25,54 +25,50 @@ async def _latest_ts(db) -> int | None:
 
 
 async def _scan_age(last_ts: int | None) -> tuple[str, bool]:
-    """Returns (status_string, is_stale)."""
     if last_ts is None:
         return "⏳  Awaiting first scan…", True
     ago = int(time.time()) - last_ts
     if ago < 40:
-        return f"✅  {ago}s ago", False
+        return f"✅  Live  ({ago}s ago)", False
     elif ago < 180:
         return f"⚠️  {ago}s ago — slightly stale", True
     else:
-        mins = ago // 60
-        return f"🔴  {mins}m ago — DATA STALE", True
+        return f"🔴  {ago // 60}m ago — DATA STALE", True
 
 
 async def build_dashboard_embed() -> discord.Embed:
     now_dt = datetime.now(timezone.utc)
 
-    embed = discord.Embed(
-        color=DASHBOARD_COLOR,
-        timestamp=now_dt,
-    )
-
-    embed.set_author(
-        name="🔴  FIRE NATION  ·  LIVE INTELLIGENCE DASHBOARD",
-    )
+    embed = discord.Embed(color=DASHBOARD_COLOR, timestamp=now_dt)
+    embed.set_author(name="🔴  FIRE NATION  ·  LIVE INTELLIGENCE DASHBOARD")
 
     async with aiosqlite.connect(DB_PATH) as db:
         last_ts = await _latest_ts(db)
         scan_str, stale = await _scan_age(last_ts)
 
-        # ── SYSTEM STATUS bar (description) ─────────────────────────────────
+        # ── STATUS BANNER (wide code block = forces embed width) ─────────────
+        div = "═" * W
         embed.description = (
             f"```\n"
-            f"  LAST SCAN   {scan_str}\n"
+            f"  ╔{div}╗\n"
+            f"  ║  {'SYSTEM STATUS':<{W-2}}║\n"
+            f"  ╠{div}╣\n"
+            f"  ║  LAST SCAN   {scan_str:<{W-14}}║\n"
+            f"  ╚{div}╝\n"
             f"```"
         )
 
-        # ── PER-GROUP INLINE FIELDS (3 across) ──────────────────────────────
+        # ── GROUP TABLE ──────────────────────────────────────────────────────
         totals = {"tracked": 0, "online": 0, "ingame": 0}
+        group_data = {}
 
         for group_id, group_name in MONITORED_GROUPS.items():
-            emoji = GROUP_EMOJI.get(group_name, "●")
-
             async with db.execute(
                 "SELECT COUNT(*) FROM group_members WHERE group_id = ?", (group_id,)
             ) as cur:
                 tracked = (await cur.fetchone())[0]
-            totals["tracked"] += tracked
 
+            online_only = ingame = 0
             if last_ts and not stale:
                 async with db.execute("""
                     SELECT COUNT(DISTINCT h.user_id)
@@ -80,7 +76,6 @@ async def build_dashboard_embed() -> discord.Embed:
                     WHERE gm.group_id = ? AND h.timestamp = ? AND h.presence_type = 1
                 """, (group_id, last_ts)) as cur:
                     online_only = (await cur.fetchone())[0]
-
                 async with db.execute("""
                     SELECT COUNT(DISTINCT h.user_id)
                     FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
@@ -88,38 +83,42 @@ async def build_dashboard_embed() -> discord.Embed:
                 """, (group_id, last_ts)) as cur:
                     ingame = (await cur.fetchone())[0]
 
-                totals["online"] += online_only + ingame
-                totals["ingame"] += ingame
+            totals["tracked"] += tracked
+            totals["online"]  += online_only + ingame
+            totals["ingame"]  += ingame
+            group_data[group_name] = {
+                "tracked": tracked,
+                "online": online_only + ingame,
+                "ingame": ingame,
+            }
 
-                field_value = (
-                    f"👥  **{tracked}** tracked\n"
-                    f"🟢  **{online_only + ingame}** online\n"
-                    f"🎮  **{ingame}** in‑game"
-                )
-            else:
-                field_value = (
-                    f"👥  **{tracked}** tracked\n"
-                    f"🟡  Data stale"
-                )
-
-            embed.add_field(
-                name=f"{emoji}  {group_name}",
-                value=field_value,
-                inline=True,
+        div2 = "─" * W
+        header = f"  {'GROUP':<16}{'TRACKED':>9}{'ONLINE':>9}{'IN-GAME':>9}"
+        rows = []
+        for gname, d in group_data.items():
+            short = gname  # e.g. "TSB Air"
+            rows.append(
+                f"  {short:<16}{d['tracked']:>9}{d['online']:>9}{d['ingame']:>9}"
             )
-
-        # Totals row (full width)
-        embed.add_field(
-            name="\u200b",  # zero-width space — blank separator
-            value=(
-                f"**Total:**  {totals['tracked']} tracked  ·  "
-                f"{totals['online']} online  ·  "
-                f"{totals['ingame']} in‑game"
-            ),
-            inline=False,
+        total_row = (
+            f"  {'TOTAL':<16}{totals['tracked']:>9}"
+            f"{totals['online']:>9}{totals['ingame']:>9}"
         )
 
-        # ── TOP GAMES ────────────────────────────────────────────────────────
+        group_block = (
+            f"```\n"
+            f"  {div2}\n"
+            f"{header}\n"
+            f"  {div2}\n"
+            + "\n".join(rows) + "\n"
+            f"  {div2}\n"
+            f"{total_row}\n"
+            f"  {div2}\n"
+            f"```"
+        )
+        embed.add_field(name="📊  MONITORED GROUPS", value=group_block, inline=False)
+
+        # ── TOP GAMES TABLE ──────────────────────────────────────────────────
         if last_ts:
             async with db.execute("""
                 SELECT h.universe_id, COUNT(DISTINCT h.user_id) as cnt, kg.name
@@ -133,41 +132,48 @@ async def build_dashboard_embed() -> discord.Embed:
             game_rows = []
 
         if game_rows:
+            MEDALS = ["#1", "#2", "#3", "#4", "#5", "#6"]
+            max_cnt = game_rows[0][1] if game_rows else 1
+
             game_lines = []
             for i, (uid, cnt, name) in enumerate(game_rows):
-                rank = RANK_EMOJI[i] if i < len(RANK_EMOJI) else f"{i+1}."
-                game_name = (name or f"Universe {uid}")[:32]
-                # Per-group breakdown
-                group_parts = []
-                for gid, gname in MONITORED_GROUPS.items():
+                medal = MEDALS[i] if i < len(MEDALS) else f"#{i+1}"
+                gname_str = (name or f"Universe {uid}")[:26]
+                bar = _bar(cnt / max(max_cnt, 1), 10)
+
+                # group breakdown
+                parts = []
+                for gid, grpname in MONITORED_GROUPS.items():
                     async with db.execute("""
                         SELECT COUNT(DISTINCT h.user_id)
                         FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
-                        WHERE h.timestamp = ? AND h.universe_id = ? AND gm.group_id = ? AND h.presence_type = 2
+                        WHERE h.timestamp=? AND h.universe_id=? AND gm.group_id=? AND h.presence_type=2
                     """, (last_ts, uid, gid)) as cur2:
                         gcnt = (await cur2.fetchone())[0]
-                    if gcnt > 0:
-                        short = gname.replace("TSB ", "")
-                        group_parts.append(f"{short}: {gcnt}")
+                    if gcnt:
+                        parts.append(f"{grpname.replace('TSB ', '')}: {gcnt}")
 
-                breakdown = "  ·  ".join(group_parts) if group_parts else ""
-                bar_filled = min(int((cnt / max(game_rows[0][1], 1)) * 8), 8)
-                bar = "█" * bar_filled + "░" * (8 - bar_filled)
+                breakdown = "  ·  ".join(parts) if parts else "—"
+                game_lines.append(
+                    f"  {medal:<4} {gname_str:<26}  {cnt:>3} ply  [{bar}]\n"
+                    f"       ↳ {breakdown}"
+                )
 
-                line = f"{rank}  **{game_name}**  —  {cnt} players  `{bar}`"
-                if breakdown:
-                    line += f"\n> {breakdown}"
-                game_lines.append(line)
-
-            embed.add_field(
-                name="🎮  Top Games Right Now",
-                value="\n".join(game_lines),
-                inline=False,
+            game_block = (
+                f"```\n"
+                f"  {div2}\n"
+                f"  {'#':<4} {'EXPERIENCE':<26}  {'PLY':>4}  ACTIVITY\n"
+                f"  {div2}\n"
+                + "\n".join(game_lines) + "\n"
+                f"  {div2}\n"
+                f"  Total in-game: {totals['ingame']}\n"
+                f"```"
             )
+            embed.add_field(name="🎮  TOP GAMES RIGHT NOW", value=game_block, inline=False)
         else:
             embed.add_field(
-                name="🎮  Top Games Right Now",
-                value="*No members currently in‑game.*",
+                name="🎮  TOP GAMES RIGHT NOW",
+                value=f"```\n  {div2}\n  No members currently in-game.\n  {div2}\n```",
                 inline=False,
             )
 
@@ -176,76 +182,83 @@ async def build_dashboard_embed() -> discord.Embed:
             async with db.execute("""
                 SELECT game_id, COUNT(DISTINCT user_id) as cnt, universe_id
                 FROM presence_history
-                WHERE timestamp = ? AND game_id IS NOT NULL AND presence_type = 2
+                WHERE timestamp=? AND game_id IS NOT NULL AND presence_type=2
                 GROUP BY game_id HAVING cnt > 1
-                ORDER BY cnt DESC LIMIT 3
+                ORDER BY cnt DESC LIMIT 4
             """, (last_ts,)) as cur:
                 server_rows = await cur.fetchall()
         else:
             server_rows = []
 
         if server_rows:
-            server_lines = []
+            srv_lines = []
             for job_id, cnt, uid in server_rows:
                 async with db.execute(
                     "SELECT name FROM known_games WHERE universe_id = ?", (uid,)
                 ) as cur:
                     row = await cur.fetchone()
-                gname = (row[0] if row else f"Universe {uid}")[:28]
-
-                group_parts = []
+                gname_str = (row[0] if row else f"Universe {uid}")[:24]
+                parts = []
                 for gid, grpname in MONITORED_GROUPS.items():
                     async with db.execute("""
                         SELECT COUNT(DISTINCT h.user_id)
                         FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
-                        WHERE h.timestamp = ? AND h.game_id = ? AND gm.group_id = ? AND h.presence_type = 2
+                        WHERE h.timestamp=? AND h.game_id=? AND gm.group_id=? AND h.presence_type=2
                     """, (last_ts, job_id, gid)) as cur2:
                         gcnt = (await cur2.fetchone())[0]
-                    if gcnt > 0:
-                        short = grpname.replace("TSB ", "")
-                        group_parts.append(f"{short}: {gcnt}")
-
-                breakdown = "  ·  ".join(group_parts)
-                server_lines.append(
-                    f"🔗  **{gname}**  —  **{cnt}** in same server\n> {breakdown}"
+                    if gcnt:
+                        parts.append(f"{grpname.replace('TSB ', '')}: {gcnt}")
+                breakdown = "  ·  ".join(parts) if parts else "—"
+                srv_lines.append(
+                    f"  {gname_str:<26}  {cnt:>3} members\n"
+                    f"       ↳ {breakdown}"
                 )
 
-            embed.add_field(
-                name="🖥️  Same-Server Concentrations",
-                value="\n".join(server_lines),
-                inline=False,
+            srv_block = (
+                f"```\n"
+                f"  {div2}\n"
+                f"  {'GAME':<26}  {'MEMBERS':>7}\n"
+                f"  {div2}\n"
+                + "\n".join(srv_lines) + "\n"
+                f"  {div2}\n"
+                f"```"
             )
+            embed.add_field(name="🖥️  SAME-SERVER CONCENTRATIONS", value=srv_block, inline=False)
 
         # ── RECENT ALERTS ────────────────────────────────────────────────────
         async with db.execute("""
             SELECT a.timestamp, a.alert_level, a.universe_id, kg.name
             FROM alert_history a
             LEFT JOIN known_games kg ON a.universe_id = kg.universe_id
-            ORDER BY a.timestamp DESC LIMIT 4
+            ORDER BY a.timestamp DESC LIMIT 5
         """) as cur:
             alert_rows = await cur.fetchall()
 
         if alert_rows:
-            alert_lines = []
+            a_lines = []
             for ts, level, uid, name in alert_rows:
-                t = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M")
+                t = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M UTC")
                 icon = ALERT_ICONS.get(level, "⚪")
-                gname = (name or f"Universe {uid}")[:26]
-                alert_lines.append(f"{icon}  `{t}`  **{gname}**  —  {level}")
+                gname_str = (name or f"Universe {uid}")[:24]
+                a_lines.append(f"  {icon}  {t}   {level:<10}  {gname_str}")
 
-            embed.add_field(
-                name="🚨  Recent Spike Alerts",
-                value="\n".join(alert_lines),
-                inline=False,
+            alert_block = (
+                f"```\n"
+                f"  {div2}\n"
+                f"  {'TIME':<12}  {'SEVERITY':<10}  EXPERIENCE\n"
+                f"  {div2}\n"
+                + "\n".join(a_lines) + "\n"
+                f"  {div2}\n"
+                f"```"
             )
+            embed.add_field(name="🚨  RECENT SPIKE ALERTS", value=alert_block, inline=False)
         else:
             embed.add_field(
-                name="🚨  Recent Spike Alerts",
-                value="*No spike alerts recorded yet.*",
+                name="🚨  RECENT SPIKE ALERTS",
+                value=f"```\n  {div2}\n  No spike alerts recorded yet.\n  {div2}\n```",
                 inline=False,
             )
 
-        # ── FOOTER ───────────────────────────────────────────────────────────
         embed.set_footer(
             text="🔄 Scan every 20s  ·  🔁 Group sync every 15m  ·  Last updated"
         )
