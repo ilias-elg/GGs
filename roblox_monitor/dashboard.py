@@ -58,6 +58,8 @@ async def build_dashboard_embed() -> discord.Embed:
         # ── GROUP BREAKDOWN ──────────────────────────────────────────
         group_lines = []
         total_tracked = 0
+        total_online = 0
+        total_ingame = 0
 
         for group_id, group_name in MONITORED_GROUPS.items():
             async with db.execute(
@@ -66,29 +68,41 @@ async def build_dashboard_embed() -> discord.Embed:
                 tracked = (await cur.fetchone())[0]
             total_tracked += tracked
 
-            # How many from this group are currently in-game?
             if last_scan_ts and not stale:
+                # Online (presenceType 1 = online but not in game)
                 async with db.execute('''
                     SELECT COUNT(DISTINCT h.user_id)
                     FROM presence_history h
                     JOIN group_members gm ON h.user_id = gm.user_id
-                    WHERE gm.group_id = ? AND h.timestamp = ?
+                    WHERE gm.group_id = ? AND h.timestamp = ? AND h.presence_type = 1
                 ''', (group_id, last_scan_ts)) as cur:
-                    active = (await cur.fetchone())[0]
-                active_str = f"{active} playing"
-            else:
-                active_str = "— stale"
+                    online = (await cur.fetchone())[0]
 
-            group_lines.append(f"  {group_name:<12}  {tracked:>3} members   {active_str}")
+                # In-game (presenceType 2)
+                async with db.execute('''
+                    SELECT COUNT(DISTINCT h.user_id)
+                    FROM presence_history h
+                    JOIN group_members gm ON h.user_id = gm.user_id
+                    WHERE gm.group_id = ? AND h.timestamp = ? AND h.presence_type = 2
+                ''', (group_id, last_scan_ts)) as cur:
+                    ingame = (await cur.fetchone())[0]
+
+                total_online += online
+                total_ingame += ingame
+                status_str = f"{online} online  {ingame} playing"
+            else:
+                status_str = "— stale"
+
+            group_lines.append(f"  {group_name:<12}  {tracked:>3} members   {status_str}")
 
         embed.add_field(
             name="╠═  MONITORED GROUPS",
             value=(
                 f"```ansi\n"
-                f"\u001b[1;31m{'GROUP':<14}{'TRACKED':>9}   STATUS\u001b[0m\n"
+                f"\u001b[1;31m{'GROUP':<14}{'TRACKED':>9}   ONLINE  PLAYING\u001b[0m\n"
                 + "\n".join(group_lines) +
-                f"\n\u001b[2;37m{'─'*40}\u001b[0m\n"
-                f"  {'TOTAL':<14}{total_tracked:>3} users\n"
+                f"\n\u001b[2;37m{'─'*48}\u001b[0m\n"
+                f"  {'TOTAL':<14}{total_tracked:>3} users    {total_online:>5}   {total_ingame:>5}\n"
                 f"```"
             ),
             inline=False

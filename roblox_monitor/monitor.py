@@ -96,17 +96,25 @@ class MonitorTasks:
                 new_universes = set()
                 
                 active_players = 0
-                
+                online_players = 0
+
                 for p in presences:
-                    # userPresenceType 2 is In-Game
-                    if p.get('userPresenceType') == 2:
+                    ptype = p.get('userPresenceType', 0)
+                    user_id = p.get('userId')
+
+                    if ptype == 1:
+                        # Online on Roblox but not in a game
+                        online_players += 1
+                        records.append((now, user_id, None, None, 1))
+
+                    elif ptype == 2:
+                        # In-game
                         uid = p.get('universeId')
-                        game_id = p.get('gameId') # This is the jobId/server id
-                        user_id = p.get('userId')
-                        
+                        game_id = p.get('gameId')
+
                         if uid:
                             active_players += 1
-                            records.append((now, user_id, uid, game_id))
+                            records.append((now, user_id, uid, game_id, 2))
                             new_universes.add(uid)
                 
                 # Check known games and fetch missing names
@@ -123,14 +131,17 @@ class MonitorTasks:
                 
                 # Insert into history
                 if records:
-                    await db.executemany('INSERT INTO presence_history (timestamp, user_id, universe_id, game_id) VALUES (?, ?, ?, ?)', records)
+                    await db.executemany(
+                        'INSERT INTO presence_history (timestamp, user_id, universe_id, game_id, presence_type) VALUES (?, ?, ?, ?, ?)',
+                        records
+                    )
                 await db.commit()
                 
                 # 4. Analyze for spikes
                 await self.analyze_spikes(db, now)
                 
                 duration = time.time() - start_time
-                logger.info(f"Presence scan complete in {duration:.1f}s. Active players: {active_players}")
+                logger.info(f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players}")
                 
         except Exception as e:
             self.last_scan_status = "ERROR"

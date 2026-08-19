@@ -190,14 +190,25 @@ async def _get_group_status(group_name: str) -> dict:
             return {"group": full_name, "tracked": tracked, "in_game": 0,
                     "top_games": [], "note": "No scan data yet."}
 
+        # Currently online (on Roblox but not in a game)
+        async with db.execute("""
+            SELECT COUNT(DISTINCT h.user_id)
+            FROM presence_history h
+            JOIN group_members gm ON h.user_id = gm.user_id
+            WHERE gm.group_id = ? AND h.timestamp = ? AND h.presence_type = 1
+        """, (group_id, last_ts)) as cur:
+            online_only = (await cur.fetchone())[0]
+
         # Currently in-game
         async with db.execute("""
             SELECT COUNT(DISTINCT h.user_id)
             FROM presence_history h
             JOIN group_members gm ON h.user_id = gm.user_id
-            WHERE gm.group_id = ? AND h.timestamp = ?
+            WHERE gm.group_id = ? AND h.timestamp = ? AND h.presence_type = 2
         """, (group_id, last_ts)) as cur:
             in_game = (await cur.fetchone())[0]
+
+        total_online = online_only + in_game
 
         # Top games
         async with db.execute("""
@@ -226,6 +237,8 @@ async def _get_group_status(group_name: str) -> dict:
         return {
             "group": full_name,
             "tracked_members": tracked,
+            "currently_online_roblox": total_online,  # on website OR in-game
+            "currently_online_only": online_only,      # on website, NOT in-game
             "currently_in_game": in_game,
             "top_games": games,
             "joined_in_last_3min": recent_window_count,

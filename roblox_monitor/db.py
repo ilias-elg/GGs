@@ -68,6 +68,14 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_presence_history_universe ON presence_history(universe_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_user_memories_uid ON user_memories(user_id)')
 
+        # Migration: add presence_type column if it doesn't exist yet
+        try:
+            await db.execute(
+                "ALTER TABLE presence_history ADD COLUMN presence_type INTEGER DEFAULT 2"
+            )
+        except Exception:
+            pass  # Column already exists
+
         await db.commit()
 
 async def cleanup_old_data():
