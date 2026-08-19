@@ -4,10 +4,8 @@ from discord.ext import commands
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
-# We need these two tokens to run the bot
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 
@@ -15,16 +13,29 @@ if not DISCORD_TOKEN or not GROQ_API_KEY:
     print("Error: Missing DISCORD_TOKEN or GROQ_API_KEY in the .env file.")
     exit(1)
 
-# Initialize the OpenAI client pointing to Groq's super-fast API
+# Groq via OpenAI-compatible client
 ai_client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
-    api_key=GROQ_API_KEY
+    api_key=GROQ_API_KEY,
 )
 
-# Set up Discord bot intents (Message Content is required to read what users say)
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# The one channel where Bob responds to EVERYTHING (no need to say his name)
+AI_CHANNEL_ID = 1090066231312261133
+
+# Lazy-loaded on first message so the event loop is running
+_manager = None
+
+def get_manager():
+    global _manager
+    if _manager is None:
+        from conversation.manager import ConversationManager
+        _manager = ConversationManager(ai_client)
+    return _manager
+
 
 async def setup_hook():
     await bot.load_extension('roblox_monitor')
@@ -32,125 +43,103 @@ async def setup_hook():
 
 bot.setup_hook = setup_hook
 
-# The Groq-hosted model we'll use
-MODEL_NAME = "openai/gpt-oss-120b"
 
-# Keywords that signal the user wants the live dashboard
-DASHBOARD_TRIGGERS = [
-    "show me the dashboard",
-    "show dashboard",
-    "open dashboard",
-    "dashboard",
-    "show stats",
-    "show me stats",
-    "group stats",
-    "roblox stats",
-    "who's playing",
-    "whos playing",
-    "monitor status",
-]
+def _is_addressed_to_bob(message: discord.Message) -> bool:
+    if message.channel.id == AI_CHANNEL_ID:
+        return True
+    if bot.user and bot.user in message.mentions:
+        return True
+    if "bob" in message.content.lower():
+        return True
+    return False
 
-def wants_dashboard(text: str) -> bool:
-    """Check if the message is asking for the live dashboard."""
-    text = text.lower()
-    return any(trigger in text for trigger in DASHBOARD_TRIGGERS)
 
-def is_addressed_to_bob(message: discord.Message) -> bool:
-    """Returns True if the message is directed at Bob."""
-    content = message.content.lower()
-    is_mentioned = message.guild and message.mentions and any(
-        u.id == message.guild.me.id for u in message.mentions
-    ) if message.guild else bot.user in message.mentions
-    is_named = "bob" in content
-    is_command = message.content.startswith("!ask")
-    return is_mentioned or is_named or is_command
+def _clean_content(message: discord.Message) -> str:
+    """Strip mention and 'hey bob' preamble from message content."""
+    content = message.content
+    if bot.user:
+        content = content.replace(f"<@{bot.user.id}>", "").strip()
+    lower = content.lower()
+    for prefix in ("hey bob,", "hey bob"):
+        if lower.startswith(prefix):
+            content = content[len(prefix):].strip()
+            break
+    return content.strip()
+
+
+DASHBOARD_TRIGGERS = {
+    "show me the dashboard", "show dashboard", "open dashboard",
+    "dashboard", "show stats", "who's playing", "whos playing",
+}
+
+MEMORY_QUERIES = {
+    "what do you remember", "what do you know about me",
+    "what have you saved", "show my memories",
+}
+
+FORGET_PREFIXES = ("forget ", "delete ", "remove ")
+FORGET_EXACT = {"forget that", "forget it", "delete that", "remove that"}
+
 
 @bot.event
 async def on_ready():
-    print(f'🔥 Logged in successfully as {bot.user.name}')
-    print(f'Ready to answer questions in your server!')
+    print(f'🔥 Logged in as {bot.user.name}')
+    print(f'AI channel: {AI_CHANNEL_ID}')
+
 
 @bot.event
-async def on_message(message):
-    # Don't let the bot reply to itself
-    if message.author == bot.user:
+async def on_message(message: discord.Message):
+    if message.author.bot:
         return
 
-    if not is_addressed_to_bob(message):
+    if not _is_addressed_to_bob(message):
         await bot.process_commands(message)
         return
 
-    # Clean the message text
-    content = message.content
-    content = content.replace(f'<@{bot.user.id}>', '').replace('!ask', '').strip()
-    # Remove "bob" and "hey" from the start so the AI gets the actual intent
-    clean = content.lower().lstrip()
-    for prefix in ["hey bob,", "hey bob", "bob,"]:
-        if clean.startswith(prefix):
-            content = content[len(prefix):].strip()
-            break
+    content = _clean_content(message)
+    lower = content.lower().strip()
+    manager = get_manager()
 
     if not content:
-        await message.channel.send("Hey! What's up? Ask me anything or say **\"show me the dashboard\"** to see live group stats!")
+        if message.channel.id != AI_CHANNEL_ID:
+            await message.reply("Yeah? What's up?")
         return
 
-    # --- DASHBOARD REQUEST ---
-    if wants_dashboard(content):
+    # ── Memory: show all memories ────────────────────────────────────────────
+    if any(q in lower for q in MEMORY_QUERIES):
+        await manager.show_memories(message)
+        return
+
+    # ── Memory: forget something ─────────────────────────────────────────────
+    fragment = ""
+    is_forget = lower in FORGET_EXACT
+    if not is_forget:
+        for prefix in FORGET_PREFIXES:
+            if lower.startswith(prefix):
+                is_forget = True
+                fragment = lower[len(prefix):].strip()
+                break
+    if is_forget:
+        if not fragment:
+            # "forget that" — find the last thing the user asked to remember
+            from conversation import memory as mem
+            for entry in reversed(mem.get_history(message.channel.id)):
+                if entry.get("role") == "user" and "remember" in entry.get("content", "").lower():
+                    fragment = entry["content"].lower().replace("remember", "").strip(" ,.")
+                    break
+        await manager.forget(message, fragment)
+        return
+
+    # ── Dashboard shortcut ───────────────────────────────────────────────────
+    if any(t in lower for t in DASHBOARD_TRIGGERS):
         async with message.channel.typing():
             try:
-                # Import the dashboard builder from roblox_monitor
                 from roblox_monitor.dashboard import build_dashboard_embed
                 embed = await build_dashboard_embed()
                 await message.reply(embed=embed)
             except Exception as e:
-                await message.reply(f"❌ Couldn't load the dashboard right now: {e}")
+                await message.reply(f"❌ Couldn't load the dashboard: {e}")
         return
 
-    # --- AI RESPONSE ---
-    async with message.channel.typing():
-        try:
-            completion = ai_client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are Bob, a witty and intelligent Discord bot for a Roblox group monitoring server. "
-                            "You monitor TSB Air, TSB Earth, and TSB Water Roblox groups for player activity and spikes. "
-                            "Keep responses concise and well formatted for Discord. "
-                            "If someone asks about live stats or the dashboard, tell them to say 'show me the dashboard'."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": content
-                    }
-                ],
-                temperature=0.7,
-                max_tokens=1024
-            )
-
-            answer = completion.choices[0].message.content
-
-            # Token usage bar
-            tokens_used = completion.usage.total_tokens
-            limit = 8000
-            percent = min(tokens_used / limit, 1.0)
-            bar_length = 20
-            filled = int(bar_length * percent)
-            bar = '█' * filled + '░' * (bar_length - filled)
-            usage_text = f"\n\n`Tokens: {tokens_used} / {limit} [{bar}]`"
-            answer += usage_text
-
-            if len(answer) > 2000:
-                answer = answer[:1996] + "..."
-
-            await message.reply(answer)
-
-        except Exception as e:
-            await message.reply(f"❌ An error occurred: {e}")
-
-    await bot.process_commands(message)
-
-# Start the bot
-bot.run(DISCORD_TOKEN)
+    # ── Full conversational AI ───────────────────────────────────────────────
+    await manager.handle(message, content)

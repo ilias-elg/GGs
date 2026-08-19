@@ -42,12 +42,32 @@ async def init_db():
             )
         ''')
         
+        # Conversation AI memory tables
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS user_memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                importance INTEGER DEFAULT 5,
+                created_at INTEGER,
+                last_used_at INTEGER
+            )
+        ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS channel_summaries (
+                channel_id INTEGER PRIMARY KEY,
+                summary TEXT,
+                updated_at INTEGER
+            )
+        ''')
+
         # Indexes for fast querying
         await db.execute('CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_presence_history_time ON presence_history(timestamp)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_presence_history_universe ON presence_history(universe_id)')
-        
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_user_memories_uid ON user_memories(user_id)')
+
         await db.commit()
 
 async def cleanup_old_data():
