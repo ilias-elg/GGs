@@ -308,9 +308,13 @@ class MonitorTasks:
                 
         if ALERT_USER_ID:
             try:
-                user_id = int(ALERT_USER_ID)
+                # Strip potential quotes/spaces from env var
+                clean_id = str(ALERT_USER_ID).strip("'\" ")
+                user_id = int(clean_id)
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
                 if user:
                     await user.send(embed=embed)
+            except discord.Forbidden:
+                logger.error(f"Cannot DM {ALERT_USER_ID}: User has DMs disabled for server members.")
             except Exception as e:
                 logger.error(f"Failed to DM alert to {ALERT_USER_ID}: {e}")

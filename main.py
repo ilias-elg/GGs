@@ -130,6 +130,17 @@ async def on_message(message: discord.Message):
         await manager.forget(message, fragment)
         return
 
+    # ── Test DM shortcut ─────────────────────────────────────────────────────
+    if "test dm" in lower:
+        try:
+            await message.author.send("Yo! DMs are working perfectly. If you set your ID in the `.env` file, I'll send spike alerts here.")
+            await message.reply("Just sent you a DM. If you didn't get it, check your Privacy Settings (Allow direct messages from server members).")
+        except discord.Forbidden:
+            await message.reply("❌ I tried to DM you, but Discord blocked it. You need to enable **Allow direct messages from server members** in your Privacy Settings.")
+        except Exception as e:
+            await message.reply(f"❌ Couldn't DM you: {e}")
+        return
+
     # ── Dashboard shortcut ───────────────────────────────────────────────────
     if any(t in lower for t in DASHBOARD_TRIGGERS):
         async with message.channel.typing():
