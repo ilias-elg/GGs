@@ -25,18 +25,18 @@ HR_THRESHOLDS = {
     44315578: 8     # Fire: Lieutenant
 }
 
-async def _get_public_job_ids() -> set:
-    """Fetches up to 100 public servers to check if a job ID is public."""
+async def _get_public_job_ids() -> dict:
+    """Fetches up to 100 public servers to get total player counts."""
     url = f"https://games.roblox.com/v1/games/{TARGET_PLACE_ID}/servers/Public?limit=100"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    return {s["id"] for s in data.get("data", []) if "id" in s}
+                    return {s["id"]: s.get("playing", 0) for s in data.get("data", []) if "id" in s}
     except Exception:
         pass
-    return set()
+    return {}
 
 
 async def _latest_ts(db) -> int | None:
@@ -209,7 +209,11 @@ async def build_dashboard_embed() -> discord.Embed:
                 is_private = job_id not in public_jobs if public_jobs else False
                 server_label = "Private Server" if is_private else "Public Server"
                 
-                line = f"🔗  **{cnt}** members in server `ID: {short_id}` ({server_label})\n> {breakdown}"
+                if not is_private and job_id in public_jobs:
+                    total_players = public_jobs[job_id]
+                    line = f"🔗  **{total_players} players** in server `ID: {short_id}` ({server_label})\n> 🛡️ **{cnt} group members:** {breakdown}"
+                else:
+                    line = f"🔗  **{cnt} tracked members** in server `ID: {short_id}` ({server_label})\n> 🛡️ **Breakdown:** {breakdown}"
                 
                 if hrs_dict:
                     hr_strings = [f"**{uname}** ({'/'.join(groups)})" for uname, groups in hrs_dict.items()]
