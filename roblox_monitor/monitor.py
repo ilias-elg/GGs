@@ -8,6 +8,7 @@ from datetime import datetime
 
 from .config import (
     MONITORED_GROUPS, PRESENCE_SCAN_INTERVAL, GROUP_SYNC_INTERVAL,
+    TARGET_UNIVERSE_ID,
     SPIKE_WINDOW_SECONDS, ALERT_THRESHOLD_INFO, ALERT_THRESHOLD_WARNING,
     ALERT_THRESHOLD_HIGH, ALERT_THRESHOLD_CRITICAL, ALERT_PERCENT_INFO,
     ALERT_COOLDOWN_MINUTES, ALERTS_CHANNEL_ID, ALERT_USER_ID
@@ -195,6 +196,9 @@ class MonitorTasks:
                     
         # Analyze each active universe
         for universe_id, current in current_counts.items():
+            if universe_id != TARGET_UNIVERSE_ID:
+                continue
+
             prev = prev_counts.get(universe_id, 0)
             increase = current - prev
             

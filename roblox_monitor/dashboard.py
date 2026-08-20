@@ -3,12 +3,11 @@ import time
 import discord
 from datetime import datetime, timezone
 
-from .config import MONITORED_GROUPS
+from .config import MONITORED_GROUPS, TARGET_UNIVERSE_ID
 from .db import DB_PATH
 
 DASHBOARD_COLOR = 0xC0392B  # Vivid crimson red
 
-RANK_EMOJI = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"]
 ALERT_ICONS = {"INFO": "🟡", "WARNING": "🟠", "HIGH": "🔴", "CRITICAL": "💀"}
 
 GROUP_EMOJI = {
@@ -74,6 +73,7 @@ async def build_dashboard_embed() -> discord.Embed:
             totals["tracked"] += tracked
 
             if last_ts and not stale:
+                # Online (anywhere on Roblox)
                 async with db.execute("""
                     SELECT COUNT(DISTINCT h.user_id)
                     FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
@@ -81,11 +81,12 @@ async def build_dashboard_embed() -> discord.Embed:
                 """, (group_id, last_ts)) as cur:
                     online_only = (await cur.fetchone())[0]
 
+                # In-game (only in TARGET_UNIVERSE_ID)
                 async with db.execute("""
                     SELECT COUNT(DISTINCT h.user_id)
                     FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
-                    WHERE gm.group_id = ? AND h.timestamp = ? AND h.presence_type = 2
-                """, (group_id, last_ts)) as cur:
+                    WHERE gm.group_id = ? AND h.timestamp = ? AND h.presence_type = 2 AND h.universe_id = ?
+                """, (group_id, last_ts, TARGET_UNIVERSE_ID)) as cur:
                     ingame = (await cur.fetchone())[0]
 
                 totals["online"] += online_only + ingame
@@ -94,7 +95,7 @@ async def build_dashboard_embed() -> discord.Embed:
                 field_value = (
                     f"👥  **{tracked}** tracked\n"
                     f"🟢  **{online_only + ingame}** online\n"
-                    f"🎮  **{ingame}** in‑game"
+                    f"🎮  **{ingame}** playing"
                 )
             else:
                 field_value = (
@@ -114,85 +115,27 @@ async def build_dashboard_embed() -> discord.Embed:
             value=(
                 f"**Total:**  {totals['tracked']} tracked  ·  "
                 f"{totals['online']} online  ·  "
-                f"{totals['ingame']} in‑game"
+                f"{totals['ingame']} playing **The Shattered Balance**"
             ),
             inline=False,
         )
 
-        # ── TOP GAMES ────────────────────────────────────────────────────────
+        # ── ACTIVE SERVERS (TARGET GAME ONLY) ────────────────────────────────
         if last_ts:
             async with db.execute("""
-                SELECT h.universe_id, COUNT(DISTINCT h.user_id) as cnt, kg.name
-                FROM presence_history h
-                LEFT JOIN known_games kg ON h.universe_id = kg.universe_id
-                WHERE h.timestamp = ? AND h.presence_type = 2
-                GROUP BY h.universe_id ORDER BY cnt DESC LIMIT 6
-            """, (last_ts,)) as cur:
-                game_rows = await cur.fetchall()
-        else:
-            game_rows = []
-
-        if game_rows:
-            game_lines = []
-            for i, (uid, cnt, name) in enumerate(game_rows):
-                rank = RANK_EMOJI[i] if i < len(RANK_EMOJI) else f"{i+1}."
-                game_name = (name or f"Universe {uid}")[:32]
-                # Per-group breakdown
-                group_parts = []
-                for gid, gname in MONITORED_GROUPS.items():
-                    async with db.execute("""
-                        SELECT COUNT(DISTINCT h.user_id)
-                        FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
-                        WHERE h.timestamp = ? AND h.universe_id = ? AND gm.group_id = ? AND h.presence_type = 2
-                    """, (last_ts, uid, gid)) as cur2:
-                        gcnt = (await cur2.fetchone())[0]
-                    if gcnt > 0:
-                        short = gname.replace("TSB ", "")
-                        group_parts.append(f"{short}: {gcnt}")
-
-                breakdown = "  ·  ".join(group_parts) if group_parts else ""
-                bar_filled = min(int((cnt / max(game_rows[0][1], 1)) * 8), 8)
-                bar = "█" * bar_filled + "░" * (8 - bar_filled)
-
-                line = f"{rank}  **{game_name}**  —  {cnt} players  `{bar}`"
-                if breakdown:
-                    line += f"\n> {breakdown}"
-                game_lines.append(line)
-
-            embed.add_field(
-                name="🎮  Top Games Right Now",
-                value="\n".join(game_lines),
-                inline=False,
-            )
-        else:
-            embed.add_field(
-                name="🎮  Top Games Right Now",
-                value="*No members currently in‑game.*",
-                inline=False,
-            )
-
-        # ── SAME-SERVER CONCENTRATIONS ───────────────────────────────────────
-        if last_ts:
-            async with db.execute("""
-                SELECT game_id, COUNT(DISTINCT user_id) as cnt, universe_id
+                SELECT game_id, COUNT(DISTINCT user_id) as cnt
                 FROM presence_history
-                WHERE timestamp = ? AND game_id IS NOT NULL AND presence_type = 2
-                GROUP BY game_id HAVING cnt > 1
-                ORDER BY cnt DESC LIMIT 3
-            """, (last_ts,)) as cur:
+                WHERE timestamp = ? AND game_id IS NOT NULL AND presence_type = 2 AND universe_id = ?
+                GROUP BY game_id
+                ORDER BY cnt DESC LIMIT 5
+            """, (last_ts, TARGET_UNIVERSE_ID)) as cur:
                 server_rows = await cur.fetchall()
         else:
             server_rows = []
 
         if server_rows:
             server_lines = []
-            for job_id, cnt, uid in server_rows:
-                async with db.execute(
-                    "SELECT name FROM known_games WHERE universe_id = ?", (uid,)
-                ) as cur:
-                    row = await cur.fetchone()
-                gname = (row[0] if row else f"Universe {uid}")[:28]
-
+            for job_id, cnt in server_rows:
                 group_parts = []
                 for gid, grpname in MONITORED_GROUPS.items():
                     async with db.execute("""
@@ -207,31 +150,36 @@ async def build_dashboard_embed() -> discord.Embed:
 
                 breakdown = "  ·  ".join(group_parts)
                 server_lines.append(
-                    f"🔗  **{gname}**  —  **{cnt}** in same server\n> {breakdown}"
+                    f"🔗  **{cnt}** members in server `{job_id[:8]}...`\n> {breakdown}"
                 )
 
             embed.add_field(
-                name="🖥️  Same-Server Concentrations",
+                name="🖥️  Active Servers (The Shattered Balance)",
                 value="\n".join(server_lines),
                 inline=False,
             )
+        else:
+            embed.add_field(
+                name="🖥️  Active Servers (The Shattered Balance)",
+                value="*No members currently in-game.*",
+                inline=False,
+            )
 
-        # ── RECENT ALERTS ────────────────────────────────────────────────────
+        # ── RECENT ALERTS (TARGET GAME ONLY) ─────────────────────────────────
         async with db.execute("""
-            SELECT a.timestamp, a.alert_level, a.universe_id, kg.name
-            FROM alert_history a
-            LEFT JOIN known_games kg ON a.universe_id = kg.universe_id
-            ORDER BY a.timestamp DESC LIMIT 4
-        """) as cur:
+            SELECT timestamp, alert_level
+            FROM alert_history
+            WHERE universe_id = ?
+            ORDER BY timestamp DESC LIMIT 4
+        """, (TARGET_UNIVERSE_ID,)) as cur:
             alert_rows = await cur.fetchall()
 
         if alert_rows:
             alert_lines = []
-            for ts, level, uid, name in alert_rows:
+            for ts, level in alert_rows:
                 t = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M")
                 icon = ALERT_ICONS.get(level, "⚪")
-                gname = (name or f"Universe {uid}")[:26]
-                alert_lines.append(f"{icon}  `{t}`  **{gname}**  —  {level}")
+                alert_lines.append(f"{icon}  `{t}`  —  {level} SPIKE")
 
             embed.add_field(
                 name="🚨  Recent Spike Alerts",

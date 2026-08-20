@@ -9,9 +9,12 @@ MONITORED_GROUPS = {
 
 # Scanning and Syncing Intervals
 PRESENCE_SCAN_INTERVAL = 20  # seconds
-GROUP_SYNC_INTERVAL = 900  # seconds (15 minutes)
+GROUP_SYNC_INTERVAL = 900  # 15 minutes
 
-# Spike Detection
+# The only game the bot cares about
+TARGET_UNIVERSE_ID = 9662757817
+
+# Spike Alert Config
 SPIKE_WINDOW_SECONDS = 180  # 3 minutes
 
 # Alert Thresholds (Absolute number of new players in window)
