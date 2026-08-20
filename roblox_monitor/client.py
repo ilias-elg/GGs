@@ -57,34 +57,36 @@ class RobloxClient:
         return users
 
     async def fetch_presence(self, user_ids):
-        """Fetches presence for a list of user IDs in batches."""
+        """Fetches presence for a list of user IDs in concurrent batches."""
         session = await self.get_session()
-        results = []
         url = "https://presence.roblox.com/v1/presence/users"
-        
-        # Roblox API limits batch size to 50 for presence
         batch_size = 50
-        for i in range(0, len(user_ids), batch_size):
-            batch = user_ids[i:i+batch_size]
+
+        async def fetch_batch(batch):
             payload = {"userIds": batch}
-            
-            try:
-                async with session.post(url, json=payload) as resp:
-                    if resp.status == 429:
-                        await asyncio.sleep(3)
-                        # Retry once
-                        async with session.post(url, json=payload) as retry_resp:
-                            if retry_resp.status == 200:
-                                data = await retry_resp.json()
-                                results.extend(data.get('userPresences', []))
-                    elif resp.status == 200:
-                        data = await resp.json()
-                        results.extend(data.get('userPresences', []))
-                    else:
-                        logger.error(f"Failed to fetch presence: HTTP {resp.status}")
-            except Exception as e:
-                logger.error(f"Error fetching presence: {e}")
-                
+            for attempt in range(2):
+                try:
+                    async with session.post(url, json=payload) as resp:
+                        if resp.status == 429:
+                            await asyncio.sleep(3)
+                            continue
+                        elif resp.status == 200:
+                            data = await resp.json()
+                            return data.get('userPresences', [])
+                        else:
+                            logger.error(f"Failed to fetch presence: HTTP {resp.status}")
+                            return []
+                except Exception as e:
+                    logger.error(f"Error fetching presence batch: {e}")
+                    return []
+            return []
+
+        batches = [user_ids[i:i+batch_size] for i in range(0, len(user_ids), batch_size)]
+        batch_results = await asyncio.gather(*[fetch_batch(b) for b in batches])
+        
+        results = []
+        for br in batch_results:
+            results.extend(br)
         return results
 
     async def fetch_game_names(self, universe_ids):

@@ -50,7 +50,7 @@ async def _scan_age(last_ts: int | None) -> tuple[str, bool]:
     if last_ts is None:
         return "⏳  Awaiting first scan…", True
     ago = int(time.time()) - last_ts
-    if ago < 40:
+    if ago < 60:
         return f"✅  {ago}s ago", False
     elif ago < 180:
         return f"⚠️  {ago}s ago — slightly stale", True
