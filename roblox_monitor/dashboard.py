@@ -145,7 +145,8 @@ async def build_dashboard_embed() -> discord.Embed:
             server_lines = []
             for job_id, cnt in server_rows:
                 group_parts = []
-                hrs_in_server = []
+                # Use a dictionary to deduplicate HRs: {username: [groups]}
+                hrs_dict = {}
                 
                 for gid, grpname in MONITORED_GROUPS.items():
                     # Get all members of this group in this server
@@ -165,20 +166,25 @@ async def build_dashboard_embed() -> discord.Embed:
                         threshold = HR_THRESHOLDS.get(gid, 999)
                         for uid, rank, username in members_in_server:
                             if rank > threshold:
-                                hrs_in_server.append(f"**{username or str(uid)}** ({short})")
+                                uname = username or str(uid)
+                                if uname not in hrs_dict:
+                                    hrs_dict[uname] = []
+                                hrs_dict[uname].append(short)
 
                 breakdown = "  ·  ".join(group_parts)
                 
-                # Format Job ID to match in-game format (e.g., "38ec-4409")
-                if "-" in job_id and len(job_id.split("-")) >= 2:
-                    parts = job_id.split("-")
-                    short_id = f"{parts[0][:4]}-{parts[1]}"
+                # Format Job ID to match in-game format (first 8 chars split by hyphen)
+                # E.g. "520eba8d-..." -> "520e-ba8d"
+                if len(job_id) >= 8:
+                    short_id = f"{job_id[:4]}-{job_id[4:8]}"
                 else:
-                    short_id = job_id[:8]
+                    short_id = job_id
                     
                 line = f"🔗  **{cnt}** members in server `ID: {short_id}`\n> {breakdown}"
-                if hrs_in_server:
-                    line += f"\n> ⚠️ **HRs Present:** {', '.join(hrs_in_server)}"
+                
+                if hrs_dict:
+                    hr_strings = [f"**{uname}** ({'/'.join(groups)})" for uname, groups in hrs_dict.items()]
+                    line += f"\n> ⚠️ **HRs Present:** {', '.join(hr_strings)}"
                     
                 server_lines.append(line)
 
