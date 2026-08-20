@@ -149,8 +149,16 @@ async def build_dashboard_embed() -> discord.Embed:
                         group_parts.append(f"{short}: {gcnt}")
 
                 breakdown = "  ·  ".join(group_parts)
+                
+                # Format Job ID to match in-game format (e.g., "38ec-4409")
+                if "-" in job_id and len(job_id.split("-")) >= 2:
+                    parts = job_id.split("-")
+                    short_id = f"{parts[0][:4]}-{parts[1]}"
+                else:
+                    short_id = job_id[:8]
+                    
                 server_lines.append(
-                    f"🔗  **{cnt}** members in server `{job_id[:8]}...`\n> {breakdown}"
+                    f"🔗  **{cnt}** members in server `ID: {short_id}`\n> {breakdown}"
                 )
 
             embed.add_field(
