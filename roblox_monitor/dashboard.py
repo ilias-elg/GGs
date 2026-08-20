@@ -170,7 +170,7 @@ async def build_dashboard_embed() -> discord.Embed:
                 FROM presence_history
                 WHERE timestamp = ? AND game_id IS NOT NULL AND presence_type = 2 AND universe_id = ?
                 GROUP BY game_id
-                ORDER BY cnt DESC LIMIT 5
+                ORDER BY cnt DESC LIMIT 15
             """, (last_ts, TARGET_UNIVERSE_ID)) as cur:
                 server_rows = await cur.fetchall()
         else:
