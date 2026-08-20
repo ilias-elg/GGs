@@ -183,10 +183,10 @@ class MonitorTasks:
                     await msg.edit(embed=embed)
                 except discord.NotFound:
                     # Message or channel was deleted, clear it from DB
-                        await db.execute("DELETE FROM bot_status WHERE key IN ('live_dash_channel', 'live_dash_msg')")
-                        await db.commit()
-                    except Exception as e:
-                        logger.error(f"Error updating live dashboard: {e}")
+                    await db.execute("DELETE FROM bot_status WHERE key IN ('live_dash_channel', 'live_dash_msg')")
+                    await db.commit()
+                except Exception as e:
+                    logger.error(f"Error updating live dashboard: {e}")
         except Exception as e:
             logger.error(f"Failed to check live dashboard: {e}")
 
