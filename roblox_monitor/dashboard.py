@@ -14,6 +14,14 @@ GROUP_EMOJI = {
     "TSB Air":   "🌪️",
     "TSB Earth": "🌍",
     "TSB Water": "🌊",
+    "TSB Fire":  "🔥",
+}
+
+HR_THRESHOLDS = {
+    485588074: 5,   # Air: Monk
+    592750791: 6,   # Earth: Lieutenant
+    1029776236: 6,  # Water: Lieutenant
+    44315578: 8     # Fire: Lieutenant
 }
 
 
@@ -137,16 +145,27 @@ async def build_dashboard_embed() -> discord.Embed:
             server_lines = []
             for job_id, cnt in server_rows:
                 group_parts = []
+                hrs_in_server = []
+                
                 for gid, grpname in MONITORED_GROUPS.items():
+                    # Get all members of this group in this server
                     async with db.execute("""
-                        SELECT COUNT(DISTINCT h.user_id)
+                        SELECT h.user_id, gm.rank, gm.username
                         FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
                         WHERE h.timestamp = ? AND h.game_id = ? AND gm.group_id = ? AND h.presence_type = 2
                     """, (last_ts, job_id, gid)) as cur2:
-                        gcnt = (await cur2.fetchone())[0]
-                    if gcnt > 0:
+                        members_in_server = await cur2.fetchall()
+                        
+                    if members_in_server:
+                        gcnt = len(members_in_server)
                         short = grpname.replace("TSB ", "")
                         group_parts.append(f"{short}: {gcnt}")
+                        
+                        # Check for High Ranks
+                        threshold = HR_THRESHOLDS.get(gid, 999)
+                        for uid, rank, username in members_in_server:
+                            if rank > threshold:
+                                hrs_in_server.append(f"**{username or str(uid)}** ({short})")
 
                 breakdown = "  ·  ".join(group_parts)
                 
@@ -157,13 +176,15 @@ async def build_dashboard_embed() -> discord.Embed:
                 else:
                     short_id = job_id[:8]
                     
-                server_lines.append(
-                    f"🔗  **{cnt}** members in server `ID: {short_id}`\n> {breakdown}"
-                )
+                line = f"🔗  **{cnt}** members in server `ID: {short_id}`\n> {breakdown}"
+                if hrs_in_server:
+                    line += f"\n> ⚠️ **HRs Present:** {', '.join(hrs_in_server)}"
+                    
+                server_lines.append(line)
 
             embed.add_field(
                 name="🖥️  Active Servers (The Shattered Balance)",
-                value="\n".join(server_lines),
+                value="\n\n".join(server_lines),
                 inline=False,
             )
         else:

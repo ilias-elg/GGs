@@ -16,7 +16,7 @@ class RobloxClient:
     async def fetch_group_members(self, group_id):
         """Fetches all members of a group handling pagination."""
         session = await self.get_session()
-        users = set()
+        users = []
         cursor = ""
         url = f"https://groups.roblox.com/v1/groups/{group_id}/users"
         
@@ -39,7 +39,12 @@ class RobloxClient:
                     
                     if 'data' in data:
                         for item in data['data']:
-                            users.add(item['user']['userId'])
+                            users.append({
+                                'user_id': item['user']['userId'],
+                                'username': item['user'].get('username', ''),
+                                'rank': item['role']['rank'],
+                                'role': item['role']['name']
+                            })
                             
                     cursor = data.get('nextPageCursor')
                     if not cursor:

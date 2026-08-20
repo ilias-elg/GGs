@@ -76,6 +76,14 @@ async def init_db():
         except Exception:
             pass  # Column already exists
 
+        # Migration: add rank, role, username to group_members
+        try:
+            await db.execute("ALTER TABLE group_members ADD COLUMN rank INTEGER DEFAULT 0")
+            await db.execute("ALTER TABLE group_members ADD COLUMN role TEXT DEFAULT ''")
+            await db.execute("ALTER TABLE group_members ADD COLUMN username TEXT DEFAULT ''")
+        except Exception:
+            pass
+
         await db.commit()
 
 async def cleanup_old_data():

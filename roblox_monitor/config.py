@@ -4,7 +4,8 @@ import os
 MONITORED_GROUPS = {
     485588074: "TSB Air",
     592750791: "TSB Earth",
-    1029776236: "TSB Water"
+    1029776236: "TSB Water",
+    44315578: "TSB Fire"
 }
 
 # Scanning and Syncing Intervals

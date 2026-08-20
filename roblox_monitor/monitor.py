@@ -41,21 +41,25 @@ class MonitorTasks:
             async with aiosqlite.connect(DB_PATH) as db:
                 all_users = set()
                 
-                # Fetch members for each group
-                for group_id, group_name in MONITORED_GROUPS.items():
-                    users = await self.client.fetch_group_members(group_id)
-                    if not users:
+                for group_id in MONITORED_GROUPS:
+                    members = await self.client.fetch_group_members(group_id)
+                    if not members:
                         continue
                         
-                    # Clear current members for this group to handle removals
+                    # Remove old members
                     await db.execute('DELETE FROM group_members WHERE group_id = ?', (group_id,))
                     
-                    # Insert new members
-                    records = [(u, group_id) for u in users]
-                    await db.executemany('INSERT INTO group_members (user_id, group_id) VALUES (?, ?)', records)
+                    # Insert new members with rank, role, username
+                    records = [(m['user_id'], group_id, m['rank'], m['role'], m['username']) for m in members]
+                    await db.executemany(
+                        'INSERT INTO group_members (user_id, group_id, rank, role, username) VALUES (?, ?, ?, ?, ?)',
+                        records
+                    )
                     
-                    all_users.update(users)
-                
+                    # Add to tracked users for presence fetching
+                    for m in members:
+                        all_users.add(m['user_id'])
+                        
                 await db.commit()
                 self.tracked_users_count = len(all_users)
                 logger.info(f"Group sync complete. Tracking {self.tracked_users_count} unique users.")
