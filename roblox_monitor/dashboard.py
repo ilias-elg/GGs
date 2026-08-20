@@ -26,17 +26,29 @@ HR_THRESHOLDS = {
 }
 
 async def _get_public_job_ids() -> dict:
-    """Fetches up to 100 public servers to get total player counts."""
+    """Fetches up to 500 public servers to get total player counts."""
     url = f"https://games.roblox.com/v1/games/{TARGET_PLACE_ID}/servers/Public?limit=100"
+    results = {}
+    cursor = ""
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return {s["id"]: s.get("playing", 0) for s in data.get("data", []) if "id" in s}
+            for _ in range(5):
+                page_url = url if not cursor else f"{url}&cursor={cursor}"
+                async with session.get(page_url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for s in data.get("data", []):
+                            if "id" in s:
+                                results[s["id"]] = s.get("playing", 0)
+                        
+                        cursor = data.get("nextPageCursor")
+                        if not cursor:
+                            break
+                    else:
+                        break
     except Exception:
         pass
-    return {}
+    return results
 
 
 async def _latest_ts(db) -> int | None:
@@ -71,7 +83,7 @@ async def build_dashboard_embed() -> discord.Embed:
         name="🔴  FIRE NATION  ·  LIVE INTELLIGENCE DASHBOARD",
     )
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=15.0) as db:
         last_ts = await _latest_ts(db)
         scan_str, stale = await _scan_age(last_ts)
 

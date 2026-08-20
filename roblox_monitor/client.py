@@ -52,7 +52,7 @@ class RobloxClient:
                         
             except Exception as e:
                 logger.error(f"Error fetching group members for {group_id}: {e}")
-                break
+                return None  # Return None so we don't wipe the DB with a partial list
                 
         return users
 
@@ -61,24 +61,28 @@ class RobloxClient:
         session = await self.get_session()
         url = "https://presence.roblox.com/v1/presence/users"
         batch_size = 50
+        
+        # Prevent "thundering herd" 429s by limiting to 3 concurrent requests
+        sem = asyncio.Semaphore(3)
 
         async def fetch_batch(batch):
             payload = {"userIds": batch}
-            for attempt in range(2):
-                try:
-                    async with session.post(url, json=payload) as resp:
-                        if resp.status == 429:
-                            await asyncio.sleep(3)
-                            continue
-                        elif resp.status == 200:
-                            data = await resp.json()
-                            return data.get('userPresences', [])
-                        else:
-                            logger.error(f"Failed to fetch presence: HTTP {resp.status}")
-                            return []
-                except Exception as e:
-                    logger.error(f"Error fetching presence batch: {e}")
-                    return []
+            for attempt in range(3):
+                async with sem:
+                    try:
+                        async with session.post(url, json=payload) as resp:
+                            if resp.status == 429:
+                                await asyncio.sleep(3 + attempt)
+                                continue
+                            elif resp.status == 200:
+                                data = await resp.json()
+                                return data.get('userPresences', [])
+                            else:
+                                logger.error(f"Failed to fetch presence: HTTP {resp.status}")
+                                return []
+                    except Exception as e:
+                        logger.error(f"Error fetching presence batch: {e}")
+                        return []
             return []
 
         batches = [user_ids[i:i+batch_size] for i in range(0, len(user_ids), batch_size)]

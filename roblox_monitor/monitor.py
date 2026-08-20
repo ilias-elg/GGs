@@ -38,23 +38,26 @@ class MonitorTasks:
     async def sync_groups(self):
         logger.info("Starting group sync...")
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with aiosqlite.connect(DB_PATH, timeout=15.0) as db:
                 all_users = set()
                 
                 for group_id in MONITORED_GROUPS:
                     members = await self.client.fetch_group_members(group_id)
-                    if not members:
+                    # Use `is None` to check for failure vs empty list
+                    if members is None:
+                        logger.error(f"Group sync failed for {group_id}, skipping DB wipe")
                         continue
                         
                     # Remove old members
                     await db.execute('DELETE FROM group_members WHERE group_id = ?', (group_id,))
                     
-                    # Insert new members with rank, role, username
-                    records = [(m['user_id'], group_id, m['rank'], m['role'], m['username']) for m in members]
-                    await db.executemany(
-                        'INSERT INTO group_members (user_id, group_id, rank, role, username) VALUES (?, ?, ?, ?, ?)',
-                        records
-                    )
+                    if members:
+                        # Insert new members with rank, role, username
+                        records = [(m['user_id'], group_id, m['rank'], m['role'], m['username']) for m in members]
+                        await db.executemany(
+                            'INSERT INTO group_members (user_id, group_id, rank, role, username) VALUES (?, ?, ?, ?, ?)',
+                            records
+                        )
                     
                     # Add to tracked users for presence fetching
                     for m in members:
@@ -77,13 +80,15 @@ class MonitorTasks:
     async def scan_presence(self):
         start_time = time.time()
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with aiosqlite.connect(DB_PATH, timeout=15.0) as db:
                 # 1. Get all unique users
                 async with db.execute('SELECT DISTINCT user_id FROM group_members') as cursor:
                     rows = await cursor.fetchall()
                     user_ids = [r[0] for r in rows]
                 
                 if not user_ids:
+                    self.last_scan_status = "SUCCESS"
+                    self.last_scan_time = int(time.time())
                     return
                     
                 # 2. Fetch presence
@@ -149,8 +154,8 @@ class MonitorTasks:
                 logger.info(f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players}")
                 
         except Exception as e:
-            self.last_scan_status = "ERROR"
-            logger.error(f"Error in presence scan: {e}")
+            logger.error(f"Error scanning presence: {e}")
+            self.last_scan_status = "FAILED"
 
     @scan_presence.before_loop
     async def before_scan(self):
