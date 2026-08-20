@@ -1,9 +1,10 @@
 import aiosqlite
 import time
 import discord
+import aiohttp
 from datetime import datetime, timezone
 
-from .config import MONITORED_GROUPS, TARGET_UNIVERSE_ID
+from .config import MONITORED_GROUPS, TARGET_UNIVERSE_ID, TARGET_PLACE_ID
 from .db import DB_PATH
 
 DASHBOARD_COLOR = 0xC0392B  # Vivid crimson red
@@ -23,6 +24,19 @@ HR_THRESHOLDS = {
     1029776236: 6,  # Water: Lieutenant
     44315578: 8     # Fire: Lieutenant
 }
+
+async def _get_public_job_ids() -> set:
+    """Fetches up to 100 public servers to check if a job ID is public."""
+    url = f"https://games.roblox.com/v1/games/{TARGET_PLACE_ID}/servers/Public?limit=100"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {s["id"] for s in data.get("data", []) if "id" in s}
+    except Exception:
+        pass
+    return set()
 
 
 async def _latest_ts(db) -> int | None:
@@ -143,6 +157,8 @@ async def build_dashboard_embed() -> discord.Embed:
 
         if server_rows:
             server_lines = []
+            public_jobs = await _get_public_job_ids()
+            
             for job_id, cnt in server_rows:
                 group_parts = []
                 # Use a dictionary to deduplicate HRs: {username: [groups]}
@@ -180,7 +196,10 @@ async def build_dashboard_embed() -> discord.Embed:
                 else:
                     short_id = job_id
                     
-                line = f"🔗  **{cnt}** members in server `ID: {short_id}`\n> {breakdown}"
+                is_private = job_id not in public_jobs if public_jobs else False
+                server_label = "Private Server" if is_private else "Public Server"
+                
+                line = f"🔗  **{cnt}** members in server `ID: {short_id}` ({server_label})\n> {breakdown}"
                 
                 if hrs_dict:
                     hr_strings = [f"**{uname}** ({'/'.join(groups)})" for uname, groups in hrs_dict.items()]
