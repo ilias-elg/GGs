@@ -157,12 +157,39 @@ class MonitorTasks:
                 await db.execute('INSERT OR REPLACE INTO bot_status (key, value) VALUES (?, ?)', ('last_scan_time', str(now)))
                 await db.commit()
                 
+                # 6. Live Dashboard Update
+                await self.update_live_dashboard(db)
+                
                 duration = time.time() - start_time
                 logger.info(f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players}")
                 
         except Exception as e:
             logger.error(f"Error scanning presence: {e}")
             self.last_scan_status = "FAILED"
+
+    async def update_live_dashboard(self, db):
+        try:
+            async with db.execute("SELECT value FROM bot_status WHERE key = 'live_dash_channel'") as cur:
+                ch_row = await cur.fetchone()
+            async with db.execute("SELECT value FROM bot_status WHERE key = 'live_dash_msg'") as cur:
+                msg_row = await cur.fetchone()
+                
+            if ch_row and msg_row:
+                channel = self.bot.get_channel(int(ch_row[0]))
+                if channel:
+                    try:
+                        msg = await channel.fetch_message(int(msg_row[0]))
+                        from .dashboard import build_dashboard_embed
+                        embed = await build_dashboard_embed()
+                        await msg.edit(embed=embed)
+                    except discord.NotFound:
+                        # Message was deleted, clear it from DB
+                        await db.execute("DELETE FROM bot_status WHERE key IN ('live_dash_channel', 'live_dash_msg')")
+                        await db.commit()
+                    except Exception as e:
+                        logger.error(f"Error updating live dashboard: {e}")
+        except Exception as e:
+            logger.error(f"Failed to check live dashboard: {e}")
 
     @scan_presence.before_loop
     async def before_scan(self):

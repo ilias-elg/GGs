@@ -147,7 +147,14 @@ async def on_message(message: discord.Message):
             try:
                 from roblox_monitor.dashboard import build_dashboard_embed
                 embed = await build_dashboard_embed()
-                await message.reply(embed=embed)
+                msg = await message.reply(embed=embed)
+                
+                import aiosqlite
+                from roblox_monitor.db import DB_PATH
+                async with aiosqlite.connect(DB_PATH, timeout=15.0) as db:
+                    await db.execute("INSERT OR REPLACE INTO bot_status (key, value) VALUES (?, ?)", ("live_dash_channel", str(msg.channel.id)))
+                    await db.execute("INSERT OR REPLACE INTO bot_status (key, value) VALUES (?, ?)", ("live_dash_msg", str(msg.id)))
+                    await db.commit()
             except Exception as e:
                 await message.reply(f"❌ Couldn't load the dashboard: {e}")
         return
