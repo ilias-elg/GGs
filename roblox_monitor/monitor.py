@@ -175,15 +175,14 @@ class MonitorTasks:
                 msg_row = await cur.fetchone()
                 
             if ch_row and msg_row:
-                channel = self.bot.get_channel(int(ch_row[0]))
-                if channel:
-                    try:
-                        msg = await channel.fetch_message(int(msg_row[0]))
-                        from .dashboard import build_dashboard_embed
-                        embed = await build_dashboard_embed()
-                        await msg.edit(embed=embed)
-                    except discord.NotFound:
-                        # Message was deleted, clear it from DB
+                try:
+                    channel = await self.bot.fetch_channel(int(ch_row[0]))
+                    msg = await channel.fetch_message(int(msg_row[0]))
+                    from .dashboard import build_dashboard_embed
+                    embed = await build_dashboard_embed()
+                    await msg.edit(embed=embed)
+                except discord.NotFound:
+                    # Message or channel was deleted, clear it from DB
                         await db.execute("DELETE FROM bot_status WHERE key IN ('live_dash_channel', 'live_dash_msg')")
                         await db.commit()
                     except Exception as e:
