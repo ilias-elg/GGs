@@ -156,7 +156,8 @@ async def build_dashboard_embed() -> discord.Embed:
             server_rows = []
 
         if server_rows:
-            server_lines = []
+            public_server_lines = []
+            private_server_lines = []
             public_jobs = await _get_public_job_ids()
             
             for job_id, cnt in server_rows:
@@ -199,33 +200,46 @@ async def build_dashboard_embed() -> discord.Embed:
 
                 breakdown = "  ·  ".join(group_parts)
                 
-                # Format Job ID to match in-game format (first 8 chars split by hyphen)
-                # E.g. "520eba8d-..." -> "520e-ba8d"
-                if len(job_id) >= 8:
-                    short_id = f"{job_id[:4]}-{job_id[4:8]}"
+                # The game and extension use the 2nd and 3rd blocks of the UUID
+                # e.g. "2d8f3baf-7104-4802-..." -> "7104-4802"
+                if "-" in job_id:
+                    parts = job_id.split("-")
+                    if len(parts) >= 3:
+                        short_id = f"{parts[1]}-{parts[2]}"
+                    else:
+                        short_id = job_id
                 else:
                     short_id = job_id
                     
                 is_private = job_id not in public_jobs if public_jobs else False
-                server_label = "Private Server" if is_private else "Public Server"
                 
                 if not is_private and job_id in public_jobs:
                     total_players = public_jobs[job_id]
-                    line = f"🔗  **{total_players} players** in server `ID: {short_id}` ({server_label})\n> 🛡️ **{cnt} group members:** {breakdown}"
+                    line = f"🔗  **{total_players} players** in server `ID: {short_id}`\n> 🛡️ **{cnt} group members:** {breakdown}"
                 else:
-                    line = f"🔗  **{cnt} tracked members** in server `ID: {short_id}` ({server_label})\n> 🛡️ **Breakdown:** {breakdown}"
+                    line = f"🔗  **{cnt} tracked members** in server `ID: {short_id}`\n> 🛡️ **Breakdown:** {breakdown}"
                 
                 if hrs_dict:
                     hr_strings = [f"**{uname}** ({'/'.join(groups)})" for uname, groups in hrs_dict.items()]
                     line += f"\n> ⚠️ **HRs Present:** {', '.join(hr_strings)}"
                     
-                server_lines.append(line)
+                if is_private:
+                    private_server_lines.append(line)
+                else:
+                    public_server_lines.append(line)
 
-            embed.add_field(
-                name="🖥️  Active Servers (The Shattered Balance)",
-                value="\n\n".join(server_lines),
-                inline=False,
-            )
+            if public_server_lines:
+                embed.add_field(
+                    name="🖥️  Active Public Servers",
+                    value="\n\n".join(public_server_lines),
+                    inline=False,
+                )
+            if private_server_lines:
+                embed.add_field(
+                    name="🔒  Active Private Servers",
+                    value="\n\n".join(private_server_lines),
+                    inline=False,
+                )
         else:
             embed.add_field(
                 name="🖥️  Active Servers (The Shattered Balance)",
