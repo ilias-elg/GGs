@@ -115,7 +115,7 @@ async def build_dashboard_embed() -> discord.Embed:
                 tracked = (await cur.fetchone())[0]
             totals["tracked"] += tracked
 
-            if last_ts and not stale:
+            if last_ts:
                 # Online (anywhere on Roblox)
                 async with db.execute("""
                     SELECT COUNT(DISTINCT h.user_id)
