@@ -160,32 +160,42 @@ async def build_dashboard_embed() -> discord.Embed:
             public_jobs = await _get_public_job_ids()
             
             for job_id, cnt in server_rows:
-                group_parts = []
-                # Use a dictionary to deduplicate HRs: {username: [groups]}
+                # Fetch ALL group memberships for users in this server
+                async with db.execute("""
+                    SELECT h.user_id, gm.group_id, gm.rank, gm.username
+                    FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
+                    WHERE h.timestamp = ? AND h.game_id = ? AND h.presence_type = 2
+                """, (last_ts, job_id)) as cur2:
+                    all_memberships = await cur2.fetchall()
+                
+                # Deduplicate users: assign to the group where they have the highest rank
+                user_best_group = {}
                 hrs_dict = {}
                 
+                for uid, gid, rank, username in all_memberships:
+                    if uid not in user_best_group or rank > user_best_group[uid]['rank']:
+                        user_best_group[uid] = {'gid': gid, 'rank': rank}
+                        
+                    # Also collect HR info (list all HR roles they hold)
+                    threshold = HR_THRESHOLDS.get(gid, 999)
+                    if rank > threshold:
+                        uname = username or str(uid)
+                        if uname not in hrs_dict:
+                            hrs_dict[uname] = []
+                        short_name = MONITORED_GROUPS[gid].replace("TSB ", "")
+                        hrs_dict[uname].append(short_name)
+                        
+                # Tally unique counts per group based on their highest ranked group
+                group_tally = {}
+                for uid, data in user_best_group.items():
+                    gid = data['gid']
+                    group_tally[gid] = group_tally.get(gid, 0) + 1
+                    
+                group_parts = []
                 for gid, grpname in MONITORED_GROUPS.items():
-                    # Get all members of this group in this server
-                    async with db.execute("""
-                        SELECT h.user_id, gm.rank, gm.username
-                        FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
-                        WHERE h.timestamp = ? AND h.game_id = ? AND gm.group_id = ? AND h.presence_type = 2
-                    """, (last_ts, job_id, gid)) as cur2:
-                        members_in_server = await cur2.fetchall()
-                        
-                    if members_in_server:
-                        gcnt = len(members_in_server)
+                    if gid in group_tally:
                         short = grpname.replace("TSB ", "")
-                        group_parts.append(f"{short}: {gcnt}")
-                        
-                        # Check for High Ranks
-                        threshold = HR_THRESHOLDS.get(gid, 999)
-                        for uid, rank, username in members_in_server:
-                            if rank > threshold:
-                                uname = username or str(uid)
-                                if uname not in hrs_dict:
-                                    hrs_dict[uname] = []
-                                hrs_dict[uname].append(short)
+                        group_parts.append(f"{short}: {group_tally[gid]}")
 
                 breakdown = "  ·  ".join(group_parts)
                 
