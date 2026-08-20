@@ -14,6 +14,7 @@ GROUP_SYNC_INTERVAL = 900  # 15 minutes
 
 # The only game the bot cares about
 TARGET_UNIVERSE_ID = 9662757817
+TARGET_PLACE_ID = 79669834155516
 
 # Spike Alert Config
 SPIKE_WINDOW_SECONDS = 180  # 3 minutes
