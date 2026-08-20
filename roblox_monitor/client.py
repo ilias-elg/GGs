@@ -31,9 +31,9 @@ class RobloxClient:
                         await asyncio.sleep(5)
                         continue
                         
-                    if resp.status != 200:
+                    elif resp.status != 200:
                         logger.error(f"Failed to fetch group {group_id}: HTTP {resp.status}")
-                        break
+                        return None
                         
                     data = await resp.json()
                     

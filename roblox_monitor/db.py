@@ -42,6 +42,13 @@ async def init_db():
             )
         ''')
         
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS bot_status (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        
         # Conversation AI memory tables
         await db.execute('''
             CREATE TABLE IF NOT EXISTS user_memories (

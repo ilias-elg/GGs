@@ -52,6 +52,15 @@ async def _get_public_job_ids() -> dict:
 
 
 async def _latest_ts(db) -> int | None:
+    try:
+        async with db.execute("SELECT value FROM bot_status WHERE key = 'last_scan_time'") as cur:
+            row = await cur.fetchone()
+            if row and row[0]:
+                return int(row[0])
+    except Exception:
+        pass
+        
+    # Fallback if bot_status fails or doesn't exist yet
     async with db.execute("SELECT MAX(timestamp) FROM presence_history") as cur:
         row = await cur.fetchone()
         return row[0] if row and row[0] else None

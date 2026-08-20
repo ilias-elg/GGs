@@ -88,7 +88,10 @@ class MonitorTasks:
                 
                 if not user_ids:
                     self.last_scan_status = "SUCCESS"
-                    self.last_scan_time = int(time.time())
+                    now = int(time.time())
+                    self.last_scan_time = now
+                    await db.execute('INSERT OR REPLACE INTO bot_status (key, value) VALUES (?, ?)', ('last_scan_time', str(now)))
+                    await db.commit()
                     return
                     
                 # 2. Fetch presence
@@ -149,6 +152,10 @@ class MonitorTasks:
                 
                 # 4. Analyze for spikes
                 await self.analyze_spikes(db, now)
+                
+                # 5. Update bot status
+                await db.execute('INSERT OR REPLACE INTO bot_status (key, value) VALUES (?, ?)', ('last_scan_time', str(now)))
+                await db.commit()
                 
                 duration = time.time() - start_time
                 logger.info(f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players}")
