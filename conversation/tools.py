@@ -146,6 +146,27 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_image",
+            "description": "Analyze an image from a URL and extract text, stats, or describe it. Use this whenever the user attaches an image.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL of the image to analyze."
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "What you want to know about the image (e.g., 'Extract all stats from this gear', 'What does this image show?')"
+                    }
+                },
+                "required": ["url", "prompt"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -204,6 +225,9 @@ async def execute_tool(name: str, args: dict) -> dict:
         elif name == "read_webpage":
             from .web_tools import read_webpage
             return await read_webpage(args.get("url", ""))
+        elif name == "analyze_image":
+            from .vision import analyze_image_with_vision
+            return await analyze_image_with_vision(args.get("url", ""), args.get("prompt", "Describe this image in detail."))
         else:
             return {"error": f"Unknown tool: {name}"}
     except Exception as e:

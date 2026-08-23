@@ -64,7 +64,14 @@ def _clean_content(message: discord.Message) -> str:
         if lower.startswith(prefix):
             content = content[len(prefix):].strip()
             break
-    return content.strip()
+    content = content.strip()
+    
+    if message.attachments:
+        urls = [att.url for att in message.attachments if att.content_type and att.content_type.startswith('image/')]
+        if urls:
+            content += "\n\n[Attached Images: " + ", ".join(urls) + "]"
+            
+    return content
 
 
 DASHBOARD_TRIGGERS = {
