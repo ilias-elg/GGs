@@ -5,3 +5,4 @@ aiohttp
 aiosqlite
 httpx==0.27.2
 audioop-lts
+beautifulsoup4

@@ -1,5 +1,4 @@
 import aiohttp
-from bs4 import BeautifulSoup
 import re
 
 async def read_webpage(url: str) -> dict:
@@ -41,6 +40,7 @@ async def read_webpage(url: str) -> dict:
                         text_data = text_data[:15000] + "... (truncated)"
                     return {"content": text_data}
                 else:
+                    from bs4 import BeautifulSoup
                     html = await response.text()
                     soup = BeautifulSoup(html, "html.parser")
                     
