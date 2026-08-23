@@ -250,11 +250,28 @@ async def execute_tool(name: str, args: dict, message=None, bot=None) -> dict:
             if not code or not message or not bot:
                 return {"error": "Missing code, bot, or message context."}
             
-            # Execute the code in a restricted local scope
-            local_scope = {}
+            # Strip markdown code blocks if the AI included them
+            code = code.strip()
+            if code.startswith("```"):
+                lines = code.split("\\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                code = "\\n".join(lines)
+                
             import traceback
+            import discord
+            import asyncio
+            
+            local_scope = {}
+            # Inject discord into the environment so the AI doesn't have to import it
+            exec_globals = globals().copy()
+            exec_globals['discord'] = discord
+            exec_globals['asyncio'] = asyncio
+            
             try:
-                exec(code, globals(), local_scope)
+                exec(code, exec_globals, local_scope)
                 if "main" not in local_scope:
                     return {"error": "Code must define an 'async def main(bot, message):' function."}
                 
