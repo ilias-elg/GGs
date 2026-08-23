@@ -1,36 +1,26 @@
-import os
-import asyncio
-from openai import AsyncOpenAI
+import urllib.parse
+import aiohttp
 
 async def analyze_image_with_vision(url: str, prompt: str) -> dict:
-    """Uses Groq's vision model to analyze an image URL."""
-    api_key = os.getenv('GROQ_API_KEY')
-    if not api_key:
-        return {"error": "GROQ_API_KEY is missing."}
-        
+    """Uses OCR to extract text/stats from an image since the vision model is restricted."""
     try:
-        # Spin up a localized client just for the vision request
-        client = AsyncOpenAI(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=api_key,
-        )
+        api_url = f"https://api.ocr.space/parse/imageurl?apikey=helloworld&url={urllib.parse.quote(url)}"
         
-        response = await client.chat.completions.create(
-            model="llama-3.2-11b-vision-preview",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": url}}
-                    ]
-                }
-            ],
-            max_tokens=500,
-            temperature=0.2
-        )
-        
-        return {"content": response.choices[0].message.content}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, headers={'User-Agent': 'Mozilla/5.0'}) as resp:
+                data = await resp.json()
+                
+        if data.get("IsErroredOnProcessing"):
+            return {"error": "Failed to read image: " + str(data.get("ErrorMessage"))}
+            
+        text = ""
+        for result in data.get("ParsedResults", []):
+            text += result.get("ParsedText", "") + "\\n"
+            
+        if not text.strip():
+            return {"error": "I couldn't detect any readable text or stats in that image. (Make sure it's a clear screenshot of text)."}
+            
+        return {"content": f"Here is the exact text/stats I extracted from the image:\\n{text.strip()}"}
         
     except Exception as e:
         return {"error": f"Failed to analyze image: {str(e)}"}
