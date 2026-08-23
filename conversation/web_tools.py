@@ -4,6 +4,7 @@ import re
 
 async def read_webpage(url: str) -> dict:
     """Fetch a URL and return its text content. Includes special handling for Trello."""
+    url = url.strip("<> \n\t")
     try:
         # Trello trick: public Trello boards return full data if you append .json
         if "trello.com/b/" in url and not url.endswith(".json"):
