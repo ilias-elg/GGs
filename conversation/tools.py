@@ -245,6 +245,25 @@ async def execute_tool(name: str, args: dict, message=None, bot=None) -> dict:
         elif name == "analyze_image":
             from .vision import analyze_image_with_vision
             return await analyze_image_with_vision(args.get("url", ""), args.get("prompt", "Describe this image in detail."))
+        elif name == "execute_discord_python":
+            code = args.get("code", "")
+            if not code or not message or not bot:
+                return {"error": "Missing code, bot, or message context."}
+            
+            # Execute the code in a restricted local scope
+            local_scope = {}
+            import traceback
+            try:
+                exec(code, globals(), local_scope)
+                if "main" not in local_scope:
+                    return {"error": "Code must define an 'async def main(bot, message):' function."}
+                
+                result = await local_scope["main"](bot, message)
+                if result is None:
+                    return {"result": "Code executed successfully, but returned None."}
+                return {"result": str(result)}
+            except Exception as e:
+                return {"error": f"Code execution failed: {type(e).__name__}: {str(e)}\\n{traceback.format_exc()}"}
         else:
             return {"error": f"Unknown tool: {name}"}
     except Exception as e:
