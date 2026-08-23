@@ -4,11 +4,16 @@ import re
 
 async def read_webpage(url: str) -> dict:
     """Fetch a URL and return its text content. Includes special handling for Trello."""
+    url = url.strip("<> \n\t\"'")
+    
     # Aggressively extract just the URL in case the AI passes extra text
-    match = re.search(r'(https?://[^\s<>"]+)', url)
+    match = re.search(r'(https?://[^\s<>"]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s<>"]*)?)', url)
     if match:
         url = match.group(1)
-    url = url.strip("<> \n\t")
+        
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+
     try:
         # Trello trick: public Trello boards return full data if you append .json
         if "trello.com/b/" in url and not url.endswith(".json"):
@@ -16,8 +21,9 @@ async def read_webpage(url: str) -> dict:
             base_url = url.split("?")[0].rstrip("/")
             url = f"{base_url}.json"
 
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as response:
+            async with session.get(url, headers=headers, timeout=10) as response:
                 if response.status != 200:
                     return {"error": f"Failed to fetch {url}. Status code: {response.status}"}
                 
