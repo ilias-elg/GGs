@@ -109,6 +109,26 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_build_stats",
+            "description": (
+                "Calculates exact Fire damage, speed, range, and duration stats for a character build "
+                "based on their Strength stat. Use this to help users theory-craft and optimize builds."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "strength": {
+                        "type": "integer",
+                        "description": "The allocated Strength stat of the build.",
+                    }
+                },
+                "required": ["strength"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -161,6 +181,9 @@ async def execute_tool(name: str, args: dict) -> dict:
             return await _get_recent_spikes(int(args.get("limit", 5)))
         elif name == "get_spike_history":
             return await _get_spike_history(float(args.get("hours", 24)))
+        elif name == "calculate_build_stats":
+            from .build_calc import calculate_stats
+            return calculate_stats(int(args.get("strength", 0)))
         else:
             return {"error": f"Unknown tool: {name}"}
     except Exception as e:
