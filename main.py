@@ -33,7 +33,7 @@ def get_manager():
     global _manager
     if _manager is None:
         from conversation.manager import ConversationManager
-        _manager = ConversationManager(ai_client)
+        _manager = ConversationManager(ai_client, bot)
     return _manager
 
 

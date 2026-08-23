@@ -207,8 +207,9 @@ async def _maybe_summarise(ai_client: OpenAI, channel_id: int):
 # ---------------------------------------------------------------------------
 
 class ConversationManager:
-    def __init__(self, ai_client: OpenAI):
+    def __init__(self, ai_client: OpenAI, bot=None):
         self.ai = ai_client
+        self.bot = bot
 
     async def handle(self, message: discord.Message, content: str = ""):
         """Full pipeline: context → AI → tool calls → response → memory."""
@@ -262,7 +263,7 @@ class ConversationManager:
                     tool_results = []
                     for tc in choice.message.tool_calls:
                         args = json.loads(tc.function.arguments or "{}")
-                        result = await execute_tool(tc.function.name, args)
+                        result = await execute_tool(tc.function.name, args, message=message, bot=self.bot)
                         
                         if tc.function.name == "read_webpage" and "content" in result:
                             mem.set_web_context(channel_id, result["content"])

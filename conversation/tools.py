@@ -167,6 +167,23 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_discord_python",
+            "description": "GOD MODE. Write and execute arbitrary Python code. You have access to `bot` (discord.ext.commands.Bot) and `message` (discord.Message). Use this to perform ANY Discord action (generating invites, DMing users, kicking, creating channels). Code MUST define an `async def main(bot, message):` function that returns a string result.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Python code to execute. MUST define an `async def main(bot, message):` function that returns a string. Example: 'async def main(bot, message):\\n    invite = await message.channel.create_invite()\\n    return invite.url'"
+                    }
+                },
+                "required": ["code"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -204,7 +221,7 @@ async def _data_age_note(last_ts: int | None) -> str:
 # Tool executor
 # ---------------------------------------------------------------------------
 
-async def execute_tool(name: str, args: dict) -> dict:
+async def execute_tool(name: str, args: dict, message=None, bot=None) -> dict:
     """Dispatch a tool call by name and return a result dict."""
     try:
         if name == "get_group_status":
