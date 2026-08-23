@@ -81,6 +81,10 @@ def _build_messages(channel_id: int, user_id: int, user_input: str,
     if channel_summary:
         system += f"\n\nEarlier in this channel:\n{channel_summary}"
 
+    web_context = mem.get_web_context(channel_id)
+    if web_context:
+        system += f"\n\nContext from the last webpage you read:\n{web_context}"
+
     messages = [{"role": "system", "content": system}]
 
     # Recent channel history
@@ -250,6 +254,10 @@ class ConversationManager:
                     for tc in choice.message.tool_calls:
                         args = json.loads(tc.function.arguments or "{}")
                         result = await execute_tool(tc.function.name, args)
+                        
+                        if tc.function.name == "read_webpage" and "content" in result:
+                            mem.set_web_context(channel_id, result["content"])
+                            
                         tool_results.append({
                             "role": "tool",
                             "tool_call_id": tc.id,

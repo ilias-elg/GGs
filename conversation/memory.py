@@ -20,7 +20,13 @@ from roblox_monitor.db import DB_PATH
 MAX_HISTORY = 20  # messages kept per channel in RAM
 
 _channel_history: dict[int, deque] = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
+_channel_web_context: dict[int, str] = {}
 
+def set_web_context(channel_id: int, text: str):
+    _channel_web_context[channel_id] = text
+
+def get_web_context(channel_id: int) -> str | None:
+    return _channel_web_context.get(channel_id)
 
 def add_to_history(channel_id: int, role: str, content: str,
                    username: str = "", user_id: int = 0):
