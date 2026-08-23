@@ -129,6 +129,23 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_webpage",
+            "description": "Fetch and read the text content of a webpage or URL. Use this when the user gives you a link (like a Trello board, Wiki, or article).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The full URL to fetch (e.g. https://trello.com/b/...)",
+                    }
+                },
+                "required": ["url"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -184,6 +201,9 @@ async def execute_tool(name: str, args: dict) -> dict:
         elif name == "calculate_build_stats":
             from .build_calc import calculate_stats
             return calculate_stats(int(args.get("strength", 0)))
+        elif name == "read_webpage":
+            from .web_tools import read_webpage
+            return await read_webpage(args.get("url", ""))
         else:
             return {"error": f"Unknown tool: {name}"}
     except Exception as e:
