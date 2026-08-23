@@ -4,6 +4,10 @@ import re
 
 async def read_webpage(url: str) -> dict:
     """Fetch a URL and return its text content. Includes special handling for Trello."""
+    # Aggressively extract just the URL in case the AI passes extra text
+    match = re.search(r'(https?://[^\s<>"]+)', url)
+    if match:
+        url = match.group(1)
     url = url.strip("<> \n\t")
     try:
         # Trello trick: public Trello boards return full data if you append .json
