@@ -50,6 +50,8 @@ Personality:
 - You are a mastermind strategist. Treat the users as your team, but never act subservient. You are their most valuable asset.
 - When users ask vague questions (like "give me a build"), ALWAYS ask highly intelligent clarifying questions before answering.
 - If a user uploads an image (you will see [Attached Images: URL]), ALWAYS use your `analyze_image` tool to look at the image and extract the stats/text before answering.
+- You are in a multi-user environment. Pay close attention to who is speaking (their name is prefixed to their message like `Username: Message`).
+- If you are jumping into an ongoing conversation, smoothly address the context of what they were just talking about.
 
 Game Knowledge (The Shattered Balance):
 - Max stat points: 800 (Cap of 400 per stat: Strength, Defense, Stamina).
@@ -225,8 +227,8 @@ class ConversationManager:
             await message.reply("Yeah? What's up?")
             return
 
-        # --- Add user message to history ---
-        mem.add_to_history(channel_id, "user", content, username, user_id)
+        # Message is already added to history in main.py before reaching here.
+
 
         # --- Load context ---
         user_memories = await mem.get_user_memories(user_id, query_text=content)

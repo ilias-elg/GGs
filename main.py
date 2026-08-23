@@ -99,12 +99,17 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
+    content = _clean_content(message)
+    lower = content.lower().strip()
+
+    # Always log the message to Bob's short-term memory so he can "read every message"
+    from conversation import memory as mem
+    mem.add_to_history(message.channel.id, "user", content, message.author.display_name, message.author.id)
+
     if not _is_addressed_to_bob(message):
         await bot.process_commands(message)
         return
 
-    content = _clean_content(message)
-    lower = content.lower().strip()
     manager = get_manager()
 
     if not content:
