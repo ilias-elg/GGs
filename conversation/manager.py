@@ -1,335 +1,321 @@
 """
-ConversationManager — the brain of Bob.
+ConversationManager — the agentic core of Bob.
 
-Pipeline per message:
-  1. Determine if bot should respond.
-  2. Build context (history + user memories + channel summary).
-  3. Call Groq with Roblox tool definitions.
-  4. Execute any tool calls, feed results back.
-  5. Send final response to Discord.
-  6. Background: extract memories, optionally summarise channel.
+Full pipeline per message:
+  1. Build token-efficient context (history + memories + Discord metadata).
+  2. Call AI with all tool schemas.
+  3. Execute tool calls — up to MAX_TOOL_ROUNDS rounds.
+  4. Send final response to Discord (splitting if > 2000 chars).
+  5. Background: extract memories, optionally summarise channel.
+
+Key improvements over the original:
+  - Per-channel asyncio.Lock prevents race conditions in busy channels.
+  - Up to 10 tool rounds (was 3).
+  - Full async — no run_in_executor for AI calls.
+  - Proper assistant message reconstruction for multi-round tool loops.
+  - Long responses split at natural newline boundaries.
+  - show_memories / forget are now handled naturally by the AI.
 """
 
 import json
 import asyncio
 import logging
-import discord
-from openai import OpenAI
+from collections import defaultdict
 
-from . import memory as mem
-from .tools import TOOL_SCHEMAS, execute_tool
+import discord
+
+import config
+from ai.base import AIProvider, AIResponse
+from conversation import memory as mem
+from conversation.context import build_context
+from tools import get_tools_for_context, execute_tool
 
 logger = logging.getLogger("discord")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Background AI provider (cheap/fast model for memory extraction + summaries)
 # ---------------------------------------------------------------------------
 
-AI_MODEL = "openai/gpt-oss-120b"
-AI_TEMPERATURE = 0.75
-AI_MAX_TOKENS = 1024
-AI_CHANNEL_ID = 1090066231312261133   # responds to EVERY message here
-
-# How many messages from history to include in the prompt
-HISTORY_IN_PROMPT = 15
-
-SYSTEM_PROMPT = """You are Bob — a sharp, casual, and genuinely intelligent Discord bot built for a Roblox group intelligence server.
-
-You monitor three Roblox communities in real-time:
-• TSB Air  (Group ID 485588074)
-• TSB Earth (Group ID 592750791)
-• TSB Water (Group ID 1029776236)
-
-You have access to live Roblox monitoring tools. Use them whenever the user asks about group activity, games, spikes, or player counts. Call the right tool — don't guess the numbers.
-
-Personality:
-- Talk like a normal, chill, highly intelligent human. Speak naturally, casually, and concisely.
-- NEVER use emojis. Do not use cringe military roleplay phrases (like "Affirmative, Commander" or "intel-gathering tools"). 
-- You still have a fierce rivalry with another AI bot named "Jarvis". If anyone brings up Jarvis, casually roast him for being an outdated, overrated script kiddie toy.
-- Never use robotic customer service phrases like "Certainly!" or "As an AI...". Just answer directly.
-- Be witty and slightly sarcastic, but don't overdo it. Keep your messages relatively short unless they ask for a breakdown.
-- When users ask vague questions (like "give me a build"), ALWAYS ask highly intelligent clarifying questions before answering.
-- If a user uploads an image (you will see [Attached Images: URL]), ALWAYS use your `analyze_image` tool to look at the image and extract the stats/text before answering.
-- You are in a multi-user environment. Pay close attention to who is speaking (their name is prefixed to their message like `Username: Message`).
-- If you are jumping into an ongoing conversation, smoothly address the context of what they were just talking about.
-
-Game Knowledge (The Shattered Balance):
-- Max stat points: 800 (Cap of 400 per stat: Strength, Defense, Stamina).
-- HP Regen thresholds: 350 Def = 5 HP/s, 250 Def = 4 HP/s, 150 Def = 3 HP/s. 
-- Gear (especially Mythical) adds massive stat bonuses, so you always need the user's gear stats to calculate a perfect build.
-- Standard balanced build is 400 Str / 250 Def / 150 Stamina.
-- Use your `calculate_build_stats` tool if they give you a specific Strength number to calculate exact damage breakpoints.
-- If you don't know something, play it off smoothly or use your web tools to find out.
-
-Memory:
-- User memories are injected into your context. Reference them naturally when relevant.
-- If a user asks you to remember something, confirm it conversationally.
-- If asked "what do you remember about me?", list memories clearly.
-
-When users say things like:
-- "Air", "the air guys" → they mean TSB Air
-- "Earth" → TSB Earth  
-- "Water" → TSB Water
-- "TSB" → The Strongest Battlegrounds (the game)
-- "same server" → members sharing the same Roblox Job ID
-- "spike" → sudden increase in players joining a game
-
-Always answer follow-up questions using conversation context — never ask the user to repeat what they just said."""
+_bg_provider: AIProvider | None = None
 
 
-def _build_messages(channel_id: int, user_id: int, user_input: str,
-                    username: str, channel_summary: str | None,
-                    user_memories: list[str]) -> list[dict]:
-    """Assemble the full messages array for the Groq API call."""
-    system = SYSTEM_PROMPT
+def _get_bg_provider() -> AIProvider:
+    """
+    Return a lazy-initialized background AI provider using the cheap model.
+    Groq: llama-3.1-8b-instant — very fast, uses almost no quota.
+    """
+    global _bg_provider
+    if _bg_provider is None:
+        import config
+        from ai.groq_provider import GroqProvider
 
-    # Inject user memories
-    if user_memories:
-        mems_text = "\n".join(f"- {m}" for m in user_memories)
-        system += f"\n\nWhat you remember about {username}:\n{mems_text}"
+        class _BgProvider(GroqProvider):
+            def __init__(self):
+                super().__init__()
+                self.model = config.get_background_model()
 
-    # Inject channel summary if it exists
-    if channel_summary:
-        system += f"\n\nEarlier in this channel:\n{channel_summary}"
+        try:
+            _bg_provider = _BgProvider()
+        except Exception:
+            # If background provider fails, fall back to None (caller will skip)
+            pass
+    return _bg_provider
 
-    web_context = mem.get_web_context(channel_id)
-    if web_context:
-        system += f"\n\nContext from the last webpage you read:\n{web_context}"
-
-    messages = [{"role": "system", "content": system}]
-
-    # Recent channel history
-    history = mem.get_history_for_prompt(channel_id)
-    messages.extend(history[-HISTORY_IN_PROMPT:])
-
-    # Current user message (already added to history before this call,
-    # so we just ensure it's the last entry)
-    if not history or history[-1].get("content") != f"{username}: {user_input}":
-        messages.append({"role": "user", "content": f"{username}: {user_input}"})
-
-    return messages
 
 
 # ---------------------------------------------------------------------------
-# Memory extraction (runs in background after response is sent)
+# Background helpers
 # ---------------------------------------------------------------------------
 
-async def _extract_memories(ai_client: OpenAI, user_id: int, username: str,
-                             conversation_snippet: str):
+
+async def _extract_memories(
+    ai: AIProvider, user_id: int, username: str, guild_id: int | None, snippet: str
+) -> None:
     """
     Ask the AI whether anything in the last exchange is worth remembering.
-    Only saves if the AI returns a non-empty memory.
+    Uses the cheap background model to preserve main quota.
+    Runs in the background after each response is sent.
     """
+    bg = _get_bg_provider() or ai  # fall back to main provider if bg fails
     try:
-        resp = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: ai_client.chat.completions.create(
-                model=AI_MODEL,
-                temperature=0.2,
-                max_tokens=200,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You extract persistent memories from conversations. "
-                            "Return ONLY a JSON object: "
-                            '{"memory": "...", "importance": 1-10} '
-                            "if something is worth remembering, or "
-                            '{"memory": null} if not. '
-                            "Only save: preferences, nicknames, explicit requests to remember, "
-                            "important facts about the user. "
-                            "Do NOT save: greetings, small talk, temporary data, Roblox live counts."
-                        ),
-                    },
-                    {"role": "user", "content": conversation_snippet},
-                ],
+        raw = await bg.simple_complete(
+            system=(
+                "Extract memories from this conversation. "
+                "Return ONLY JSON: "
+                '{\"user_memory\": \"...\", \"server_memory\": \"...\", \"importance\": 1-10}\n'
+                "user_memory: fact about this specific user worth remembering long-term.\n"
+                "server_memory: server/project fact worth remembering (decisions, setups, plans).\n"
+                "importance: 1-10. Set a field to null if nothing worth saving.\n"
+                "Do NOT save: greetings, small talk, live Roblox counts, one-off commands."
             ),
+            user=snippet,
+            max_tokens=150,
+            temperature=0.1,
         )
 
-        raw = resp.choices[0].message.content.strip()
-        # Strip markdown code fences if present
+        # Strip markdown fences if present
+        raw = raw.strip()
         if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        data = json.loads(raw)
-        memory_text = data.get("memory")
-        importance = int(data.get("importance", 5))
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
-        if memory_text:
-            await mem.save_user_memory(user_id, memory_text, importance)
-            logger.info(f"Saved memory for {username}: {memory_text}")
+        data = json.loads(raw)
+        importance = max(1, min(10, int(data.get("importance", 5))))
+
+        if data.get("user_memory"):
+            await mem.save_user_memory(user_id, data["user_memory"], importance)
+            logger.info(f"Saved user memory for {username}: {data['user_memory']}")
+
+        if data.get("server_memory") and guild_id:
+            await mem.save_server_memory(guild_id, data["server_memory"], importance)
+            logger.info(f"Saved server memory for guild {guild_id}: {data['server_memory']}")
 
     except Exception as e:
         logger.debug(f"Memory extraction skipped: {e}")
 
 
-async def _maybe_summarise(ai_client: OpenAI, channel_id: int):
+async def _maybe_summarise(ai: AIProvider, channel_id: int) -> None:
     """
-    If channel history is at the cap, generate a summary and save it.
-    This compresses old context into a paragraph to prevent token bloat.
+    If channel history is near the cap, generate a compressed summary
+    of the oldest messages and save it. Uses the cheap background model.
     """
     history = mem.get_history(channel_id)
-    if len(history) < 18:  # only summarise when near the cap
+    if len(history) < 18:
         return
 
+    bg = _get_bg_provider() or ai
     text = "\n".join(
         f"{h.get('username', h['role'])}: {h['content']}"
-        for h in history[:10]  # summarise the oldest 10
+        for h in history[:10]  # Summarize the oldest 10
     )
     try:
-        resp = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: ai_client.chat.completions.create(
-                model=AI_MODEL,
-                temperature=0.3,
-                max_tokens=150,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Summarise this Discord conversation in 2-3 sentences, "
-                            "capturing the key topics and any important decisions or facts. "
-                            "Be concise."
-                        ),
-                    },
-                    {"role": "user", "content": text},
-                ],
+        summary = await bg.simple_complete(
+            system=(
+                "Summarize this Discord conversation in 2-3 sentences. "
+                "Key topics, decisions, relevant facts only. Be concise."
             ),
+            user=text,
+            max_tokens=120,
+            temperature=0.2,
         )
-        summary = resp.choices[0].message.content.strip()
-        await mem.save_channel_summary(channel_id, summary)
-        logger.info(f"Saved channel summary for {channel_id}")
+        if summary:
+            await mem.save_channel_summary(channel_id, summary)
+            logger.info(f"Saved channel summary for {channel_id}")
     except Exception as e:
-        logger.debug(f"Summarisation skipped: {e}")
+        logger.debug(f"Summarization skipped: {e}")
 
 
 # ---------------------------------------------------------------------------
-# Main entry point
+# Message formatting
 # ---------------------------------------------------------------------------
+
+
+def _build_assistant_message(response: AIResponse) -> dict:
+    """Convert an AIResponse back to OpenAI-format assistant message for next round."""
+    msg: dict = {"role": "assistant", "content": response.content or ""}
+    if response.tool_calls:
+        msg["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                },
+            }
+            for tc in response.tool_calls
+        ]
+    return msg
+
+
+async def _send_response(message: discord.Message, text: str) -> None:
+    """Send a response, splitting at 2000 chars on natural newline boundaries."""
+    if not text:
+        return
+
+    if len(text) <= 1990:
+        await message.reply(text)
+        return
+
+    # Split on newlines, reassembling into ≤1990-char chunks
+    chunks: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        candidate = (current + "\n" + line).lstrip() if current else line
+        if len(candidate) > 1990:
+            if current:
+                chunks.append(current)
+            # If a single line itself is too long, hard-split it
+            while len(line) > 1990:
+                chunks.append(line[:1990])
+                line = line[1990:]
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+
+    for i, chunk in enumerate(chunks):
+        if i == 0:
+            await message.reply(chunk)
+        else:
+            await message.channel.send(chunk)
+
+
+# ---------------------------------------------------------------------------
+# ConversationManager
+# ---------------------------------------------------------------------------
+
 
 class ConversationManager:
-    def __init__(self, ai_client: OpenAI, bot=None):
-        self.ai = ai_client
+    def __init__(self, ai_provider: AIProvider, bot, voice_manager=None) -> None:
+        self.ai = ai_provider
         self.bot = bot
+        self.voice_manager = voice_manager
+        # Per-channel lock ensures messages in the same channel are processed
+        # one at a time, preventing context corruption from concurrent requests.
+        self._locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    async def handle(self, message: discord.Message, content: str = ""):
-        """Full pipeline: context → AI → tool calls → response → memory."""
+    async def handle(self, message: discord.Message, content: str) -> None:
+        """Entry point — acquires per-channel lock, then runs the agent loop."""
+        channel_id = message.channel.id
+        async with self._locks[channel_id]:
+            await self._agent_loop(message, content)
+
+    async def _agent_loop(self, message: discord.Message, content: str) -> None:
+        """Full agentic pipeline: context → AI → tools → AI → ... → respond."""
         channel_id = message.channel.id
         user_id = message.author.id
         username = message.author.display_name
+        guild_id = message.guild.id if message.guild else None
 
-        # Use pre-cleaned content passed from main.py
-        if not content:
-            content = message.content
+        # Build context
+        ctx_data = await build_context(message, content, self.ai)
+        messages: list[dict] = ctx_data["messages"]
+        in_guild: bool = ctx_data["in_guild"]
 
-        if not content:
-            await message.reply("Yeah? What's up?")
-            return
-
-        # Message is already added to history in main.py before reaching here.
-
-
-        # --- Load context ---
-        user_memories = await mem.get_user_memories(user_id, query_text=content)
-        channel_summary = await mem.get_channel_summary(channel_id)
-
-        # Build initial messages
-        messages = _build_messages(
-            channel_id, user_id, content, username,
-            channel_summary, user_memories,
+        # Tool schemas — intent-based selection saves ~2,000 tokens per request
+        has_image = bool(
+            message.attachments and
+            any(a.content_type and a.content_type.startswith("image/") for a in message.attachments)
         )
+        tool_schemas = get_tools_for_context(content, in_guild=in_guild, has_image=has_image)
+        logger.debug(f"Selected {len(tool_schemas)} tools for: {content[:60]!r}")
+
+        # Tool execution context passed to discord_tools
+        tool_ctx = {
+            "message": message,
+            "bot": self.bot,
+            "voice_manager": self.voice_manager,
+            "channel_id": channel_id,
+        }
 
         async with message.channel.typing():
             try:
-                # --- First AI call (may include tool calls) ---
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self.ai.chat.completions.create(
-                        model=AI_MODEL,
-                        temperature=AI_TEMPERATURE,
-                        max_tokens=AI_MAX_TOKENS,
-                        tools=TOOL_SCHEMAS,
-                        tool_choice="auto",
-                        messages=messages,
-                    ),
+                # ── First AI call ────────────────────────────────────────────
+                response = await self.ai.chat(
+                    messages=messages,
+                    tools=tool_schemas,
+                    tool_choice="auto",
+                    temperature=0.75,
+                    max_tokens=1024,
                 )
 
-                # --- Handle tool calls (up to 3 rounds) ---
-                for _ in range(3):
-                    choice = response.choices[0]
-                    if choice.finish_reason != "tool_calls":
-                        break
+                # ── Agentic tool loop ────────────────────────────────────────
+                rounds = 0
+                while response.has_tool_calls and rounds < config.MAX_TOOL_ROUNDS:
+                    rounds += 1
+                    logger.info(
+                        f"Tool round {rounds}: calling {[tc.name for tc in response.tool_calls]}"
+                    )
 
-                    # Execute all requested tools
-                    tool_results = []
-                    for tc in choice.message.tool_calls:
-                        args = json.loads(tc.function.arguments or "{}")
-                        result = await execute_tool(tc.function.name, args, message=message, bot=self.bot)
-                        
-                        if tc.function.name == "read_webpage" and "content" in result:
-                            mem.set_web_context(channel_id, result["content"])
-                            
+                    # Execute all tool calls in this round
+                    tool_results: list[dict] = []
+                    for tc in response.tool_calls:
+                        logger.info(f"Executing tool: {tc.name} args={tc.arguments}")
+                        result = await execute_tool(tc.name, tc.arguments, tool_ctx)
+                        logger.info(f"Tool result [{tc.name}]: {json.dumps(result)[:200]}")
+
                         tool_results.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
-                            "content": json.dumps(result),
+                            "content": json.dumps(result, ensure_ascii=False),
                         })
 
-                    # Append assistant message + tool results, call again
-                    messages.append(choice.message.model_dump(exclude_unset=True))
+                    # Append assistant's tool call message + results
+                    messages.append(_build_assistant_message(response))
                     messages.extend(tool_results)
 
-                    response = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda: self.ai.chat.completions.create(
-                            model=AI_MODEL,
-                            temperature=AI_TEMPERATURE,
-                            max_tokens=AI_MAX_TOKENS,
-                            tools=TOOL_SCHEMAS,
-                            tool_choice="auto",
-                            messages=messages,
-                        ),
+                    # Next AI call to evaluate results and decide next action
+                    response = await self.ai.chat(
+                        messages=messages,
+                        tools=tool_schemas,
+                        tool_choice="auto",
+                        temperature=0.75,
+                        max_tokens=1024,
                     )
 
-                # --- Extract final text ---
-                answer = response.choices[0].message.content or ""
+                # ── Extract final text ───────────────────────────────────────
+                answer = response.content or ""
                 if not answer.strip():
-                    answer = "Hmm, I got nothing back on that one. Try again?"
+                    answer = "Hmm, got nothing back on that one. Try again?"
 
-                # Discord 2000 char limit
-                if len(answer) > 1990:
-                    answer = answer[:1987] + "…"
+                # ── Send response ────────────────────────────────────────────
+                await _send_response(message, answer)
 
-                await message.reply(answer)
-
-                # --- Add assistant response to history ---
+                # ── Update history ───────────────────────────────────────────
                 mem.add_to_history(channel_id, "assistant", answer)
 
-                # --- Background tasks (don't block the response) ---
+                # ── Background tasks (non-blocking) ─────────────────────────
                 snippet = f"{username}: {content}\nBob: {answer}"
                 asyncio.create_task(
-                    _extract_memories(self.ai, user_id, username, snippet)
+                    _extract_memories(self.ai, user_id, username, guild_id, snippet)
                 )
                 asyncio.create_task(_maybe_summarise(self.ai, channel_id))
 
             except Exception as e:
                 logger.error(f"ConversationManager error: {e}", exc_info=True)
-                await message.reply(f"❌ Something went wrong: {e}")
-
-    async def show_memories(self, message: discord.Message):
-        """Handle 'what do you remember about me?' naturally."""
-        memories = await mem.get_all_user_memories(message.author.id)
-        if not memories:
-            await message.reply("I don't have anything saved about you yet.")
-            return
-        lines = "\n".join(f"• {m}" for m in memories)
-        await message.reply(f"Here's what I've got on you:\n{lines}")
-
-    async def forget(self, message: discord.Message, fragment: str):
-        """Handle 'forget that' or 'forget [something]'."""
-        deleted = await mem.delete_user_memory(message.author.id, fragment)
-        if deleted:
-            await message.reply("Done, I've forgotten that.")
-        else:
-            await message.reply("I couldn't find anything matching that in my memory.")
+                try:
+                    await message.reply(f"Something went wrong on my end: {e}")
+                except Exception:
+                    pass

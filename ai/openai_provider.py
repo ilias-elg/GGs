@@ -1,0 +1,57 @@
+"""OpenAI provider."""
+import json
+import logging
+
+from openai import AsyncOpenAI
+
+import config
+from .base import AIProvider, AIResponse, ToolCall
+
+logger = logging.getLogger("discord")
+
+
+class OpenAIProvider(AIProvider):
+    def __init__(self) -> None:
+        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        self.model = config.get_model()
+        logger.info(f"OpenAIProvider initialized with model: {self.model}")
+
+    async def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        tool_choice: str = "auto",
+        temperature: float = 0.75,
+        max_tokens: int = 1024,
+    ) -> AIResponse:
+        kwargs: dict = dict(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice
+
+        response = await self.client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+
+        tool_calls: list[ToolCall] = []
+        if choice.message.tool_calls:
+            for tc in choice.message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                tool_calls.append(
+                    ToolCall(id=tc.id, name=tc.function.name, arguments=args)
+                )
+
+        return AIResponse(
+            content=choice.message.content,
+            tool_calls=tool_calls,
+            finish_reason=choice.finish_reason or "stop",
+            input_tokens=response.usage.prompt_tokens if response.usage else 0,
+            output_tokens=response.usage.completion_tokens if response.usage else 0,
+        )

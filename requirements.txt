@@ -1,9 +1,11 @@
-﻿discord.py==2.4.0
-openai==1.42.0
+discord.py==2.4.0
+openai>=1.50.0
 python-dotenv==1.0.1
 aiohttp
 aiosqlite
-httpx==0.27.2
+httpx>=0.27.0
 audioop-lts
 beautifulsoup4
 PyNaCl
+duckduckgo-search>=6.0.0
+anthropic>=0.34.0
