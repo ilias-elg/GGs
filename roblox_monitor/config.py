@@ -10,7 +10,7 @@ MONITORED_GROUPS = {
 
 # Scanning and Syncing Intervals
 PRESENCE_SCAN_INTERVAL = 20  # seconds
-GROUP_SYNC_INTERVAL = 900  # 15 minutes
+GROUP_SYNC_INTERVAL = 300  # 5 minutes
 
 # The only game the bot cares about
 TARGET_UNIVERSE_ID = 9662757817

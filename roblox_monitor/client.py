@@ -58,21 +58,27 @@ class RobloxClient:
 
     async def fetch_presence(self, user_ids):
         """Fetches presence for a list of user IDs in concurrent batches."""
+        import random
         session = await self.get_session()
         url = "https://presence.roblox.com/v1/presence/users"
-        batch_size = 50
+        batch_size = 100
         
         # Prevent "thundering herd" 429s by limiting to 3 concurrent requests
         sem = asyncio.Semaphore(3)
 
-        async def fetch_batch(batch):
+        async def fetch_batch(batch, index):
             payload = {"userIds": batch}
-            for attempt in range(3):
+            # Add initial jitter to spread out the very first requests
+            await asyncio.sleep(index * 0.2)
+            
+            for attempt in range(5):
                 async with sem:
                     try:
                         async with session.post(url, json=payload) as resp:
                             if resp.status == 429:
-                                await asyncio.sleep(3 + attempt)
+                                backoff = (2 ** attempt) + random.uniform(0, 0.5)
+                                logger.warning(f"429 on presence fetch, backing off {backoff:.2f}s (attempt {attempt+1})")
+                                await asyncio.sleep(backoff)
                                 continue
                             elif resp.status == 200:
                                 data = await resp.json()
@@ -82,11 +88,13 @@ class RobloxClient:
                                 return []
                     except Exception as e:
                         logger.error(f"Error fetching presence batch: {e}")
-                        return []
+                        backoff = (2 ** attempt) + random.uniform(0, 0.5)
+                        await asyncio.sleep(backoff)
+            logger.error(f"Failed to fetch presence batch after 5 attempts.")
             return []
 
         batches = [user_ids[i:i+batch_size] for i in range(0, len(user_ids), batch_size)]
-        batch_results = await asyncio.gather(*[fetch_batch(b) for b in batches])
+        batch_results = await asyncio.gather(*[fetch_batch(b, i) for i, b in enumerate(batches)])
         
         results = []
         for br in batch_results:

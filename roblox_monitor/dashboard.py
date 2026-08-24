@@ -32,7 +32,7 @@ async def _get_public_job_ids() -> dict:
     cursor = ""
     try:
         async with aiohttp.ClientSession() as session:
-            for _ in range(5):
+            for _ in range(10):
                 page_url = url if not cursor else f"{url}&cursor={cursor}"
                 async with session.get(page_url) as resp:
                     if resp.status == 200:
@@ -104,45 +104,82 @@ async def build_dashboard_embed() -> discord.Embed:
         )
 
         # ── PER-GROUP INLINE FIELDS (3 across) ──────────────────────────────
-        totals = {"tracked": 0, "online": 0, "ingame": 0}
+        group_stats = {
+            gid: {"tracked": 0, "online_only": 0, "other_game": 0, "ingame": 0, "unassigned": 0}
+            for gid in MONITORED_GROUPS
+        }
+        totals = {"tracked": 0, "online": 0, "ingame": 0, "other_game": 0, "unassigned": 0}
+
+        # 1. Deduplicate Tracked Members (assign to highest rank group)
+        async with db.execute("SELECT user_id, group_id, rank FROM group_members") as cur:
+            all_memberships = await cur.fetchall()
+            
+        user_best_group = {}
+        for uid, gid, rank in all_memberships:
+            if uid not in user_best_group or rank > user_best_group[uid]['rank']:
+                user_best_group[uid] = {'gid': gid, 'rank': rank}
+                
+        for uid, data in user_best_group.items():
+            gid = data['gid']
+            if gid in group_stats:
+                group_stats[gid]["tracked"] += 1
+                totals["tracked"] += 1
+
+        # 2. Fetch and Deduplicate Presence
+        if last_ts:
+            async with db.execute('''
+                SELECT user_id, presence_type, universe_id, game_id 
+                FROM presence_history 
+                WHERE timestamp = ?
+            ''', (last_ts,)) as cur:
+                presences = await cur.fetchall()
+                
+            for uid, ptype, universe_id, game_id in presences:
+                if uid in user_best_group:
+                    gid = user_best_group[uid]['gid']
+                    if gid not in group_stats:
+                        continue
+                        
+                    if ptype == 1:
+                        group_stats[gid]["online_only"] += 1
+                        totals["online"] += 1
+                    elif ptype == 2:
+                        if universe_id == TARGET_UNIVERSE_ID:
+                            group_stats[gid]["ingame"] += 1
+                            totals["ingame"] += 1
+                            totals["online"] += 1
+                            if game_id is None:
+                                group_stats[gid]["unassigned"] += 1
+                                totals["unassigned"] += 1
+                        else:
+                            group_stats[gid]["other_game"] += 1
+                            totals["other_game"] += 1
+                            totals["online"] += 1
 
         for group_id, group_name in MONITORED_GROUPS.items():
             emoji = GROUP_EMOJI.get(group_name, "●")
-
-            async with db.execute(
-                "SELECT COUNT(*) FROM group_members WHERE group_id = ?", (group_id,)
-            ) as cur:
-                tracked = (await cur.fetchone())[0]
-            totals["tracked"] += tracked
+            stats = group_stats[group_id]
 
             if last_ts:
-                # Online (anywhere on Roblox)
-                async with db.execute("""
-                    SELECT COUNT(DISTINCT h.user_id)
-                    FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
-                    WHERE gm.group_id = ? AND h.timestamp = ? AND h.presence_type = 1
-                """, (group_id, last_ts)) as cur:
-                    online_only = (await cur.fetchone())[0]
-
-                # In-game (only in TARGET_UNIVERSE_ID)
-                async with db.execute("""
-                    SELECT COUNT(DISTINCT h.user_id)
-                    FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
-                    WHERE gm.group_id = ? AND h.timestamp = ? AND h.presence_type = 2 AND h.universe_id = ?
-                """, (group_id, last_ts, TARGET_UNIVERSE_ID)) as cur:
-                    ingame = (await cur.fetchone())[0]
-
-                totals["online"] += online_only + ingame
-                totals["ingame"] += ingame
-
+                total_online = stats["online_only"] + stats["other_game"] + stats["ingame"]
+                
                 field_value = (
-                    f"👥  **{tracked}** tracked\n"
-                    f"🟢  **{online_only + ingame}** online\n"
-                    f"🎮  **{ingame}** playing"
+                    f"👥  **{stats['tracked']}** tracked\n"
+                    f"🟢  **{total_online}** online\n"
+                    f"🎮  **{stats['ingame']}** playing"
                 )
+                
+                extras = []
+                if stats["other_game"] > 0:
+                    extras.append(f"{stats['other_game']} in other games")
+                if stats["unassigned"] > 0:
+                    extras.append(f"{stats['unassigned']} unassigned server")
+                    
+                if extras:
+                    field_value += f"\n> *{', '.join(extras)}*"
             else:
                 field_value = (
-                    f"👥  **{tracked}** tracked\n"
+                    f"👥  **{stats['tracked']}** tracked\n"
                     f"🟡  Data stale"
                 )
 
@@ -153,13 +190,23 @@ async def build_dashboard_embed() -> discord.Embed:
             )
 
         # Totals row (full width)
+        total_extras = []
+        if totals["other_game"] > 0:
+            total_extras.append(f"{totals['other_game']} in other games")
+        if totals["unassigned"] > 0:
+            total_extras.append(f"{totals['unassigned']} unassigned server")
+            
+        totals_text = (
+            f"**Total:**  {totals['tracked']} tracked  ·  "
+            f"{totals['online']} online  ·  "
+            f"{totals['ingame']} playing **The Shattered Balance**"
+        )
+        if total_extras:
+            totals_text += f"\n*({', '.join(total_extras)})*"
+            
         embed.add_field(
             name="\u200b",  # zero-width space — blank separator
-            value=(
-                f"**Total:**  {totals['tracked']} tracked  ·  "
-                f"{totals['online']} online  ·  "
-                f"{totals['ingame']} playing **The Shattered Balance**"
-            ),
+            value=totals_text,
             inline=False,
         )
 

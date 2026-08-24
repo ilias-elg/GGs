@@ -20,7 +20,8 @@ async def init_db():
                 timestamp INTEGER,
                 user_id INTEGER,
                 universe_id INTEGER,
-                game_id TEXT
+                game_id TEXT,
+                presence_type INTEGER DEFAULT 2
             )
         ''')
         
@@ -74,6 +75,7 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_presence_history_time ON presence_history(timestamp)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_presence_history_universe ON presence_history(universe_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_user_memories_uid ON user_memories(user_id)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_presence_history_composite ON presence_history(timestamp, presence_type, universe_id)')
 
         # Migration: add presence_type column if it doesn't exist yet
         try:

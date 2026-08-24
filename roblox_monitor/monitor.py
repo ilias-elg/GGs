@@ -110,6 +110,7 @@ class MonitorTasks:
                 
                 active_players = 0
                 online_players = 0
+                null_game_id_count = 0
 
                 for p in presences:
                     ptype = p.get('userPresenceType', 0)
@@ -127,6 +128,8 @@ class MonitorTasks:
 
                         if uid:
                             active_players += 1
+                            if game_id is None:
+                                null_game_id_count += 1
                             records.append((now, user_id, uid, game_id, 2))
                             new_universes.add(uid)
                 
@@ -161,7 +164,7 @@ class MonitorTasks:
                 await self.update_live_dashboard(db)
                 
                 duration = time.time() - start_time
-                logger.info(f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players}")
+                logger.info(f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players} (Unassigned server: {null_game_id_count})")
                 
         except Exception as e:
             logger.error(f"Error scanning presence: {e}")
