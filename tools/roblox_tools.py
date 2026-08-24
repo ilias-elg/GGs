@@ -130,6 +130,19 @@ ROBLOX_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_dashboard",
+            "description": (
+                "Send the full FIRE NATION LIVE INTELLIGENCE DASHBOARD as a rich Discord embed. "
+                "Use this whenever the user asks for the dashboard, live stats, an overview, "
+                "or a summary of all groups. Do NOT narrate the data as text — call this tool "
+                "to send the real formatted embed."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -421,22 +434,6 @@ async def _get_spike_history(hours: float = 24) -> dict:
 # ---------------------------------------------------------------------------
 # Dashboard — sends the full rich Discord embed directly to the channel
 # ---------------------------------------------------------------------------
-
-ROBLOX_SCHEMAS.append({
-    "type": "function",
-    "function": {
-        "name": "send_dashboard",
-        "description": (
-            "Send the full FIRE NATION LIVE INTELLIGENCE DASHBOARD as a rich Discord embed. "
-            "Use this whenever the user asks for the dashboard, live stats, an overview, "
-            "or a summary of all groups. Do NOT narrate the data as text — call this tool "
-            "to send the real formatted embed."
-        ),
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    },
-})
-
-ROBLOX_TOOL_NAMES.add("send_dashboard")
 
 
 async def _execute_send_dashboard(ctx: dict) -> dict:
