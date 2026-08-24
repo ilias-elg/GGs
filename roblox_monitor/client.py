@@ -61,7 +61,7 @@ class RobloxClient:
         import random
         session = await self.get_session()
         url = "https://presence.roblox.com/v1/presence/users"
-        batch_size = 100
+        batch_size = 50
         
         # Prevent "thundering herd" 429s by limiting to 3 concurrent requests
         sem = asyncio.Semaphore(3)
