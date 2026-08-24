@@ -18,6 +18,7 @@ from .general_tools import (
     LOCAL_TASK_SCHEMA,
     execute_general_tool,
 )
+from .filesystem_tools import FILE_SCHEMAS, FILE_TOOL_NAMES, execute_filesystem_tool
 import config
 
 # ---------------------------------------------------------------------------
@@ -127,12 +128,13 @@ def get_tools_for_context(
     schemas.extend(GENERAL_SCHEMAS)
     if config.LOCAL_TASKS_ENABLED:
         schemas.append(LOCAL_TASK_SCHEMA)
+        schemas.extend(FILE_SCHEMAS)
 
     # Always include Roblox tools — most queries in this server are Roblox-related
     schemas.extend(ROBLOX_SCHEMAS)
 
     # Web search — include when looking things up or a URL is present
-    if wants_web:
+    if config.FULL_TOOLSET or wants_web:
         schemas.extend(WEB_SCHEMAS)
     else:
         # Always include read_webpage so the AI can read any links shared
@@ -177,6 +179,7 @@ def get_all_schemas(in_guild: bool = True) -> list[dict]:
     schemas = list(GENERAL_SCHEMAS) + list(ROBLOX_SCHEMAS) + list(WEB_SCHEMAS) + list(VISION_SCHEMAS)
     if config.LOCAL_TASKS_ENABLED:
         schemas.append(LOCAL_TASK_SCHEMA)
+        schemas.extend(FILE_SCHEMAS)
     if in_guild:
         schemas += list(DISCORD_SCHEMAS)
     return schemas
@@ -196,6 +199,8 @@ async def execute_tool(name: str, args: dict, ctx: dict) -> dict:
         return await execute_roblox_tool(name, args, ctx=ctx)
     elif name in GENERAL_TOOL_NAMES:
         return await execute_general_tool(name, args, ctx)
+    elif name in FILE_TOOL_NAMES:
+        return await execute_filesystem_tool(name, args, ctx)
     elif name in DISCORD_TOOL_NAMES:
         return await execute_discord_tool(name, args, ctx)
     elif name in WEB_TOOL_NAMES:

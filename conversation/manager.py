@@ -46,7 +46,7 @@ _CONFIRMATION_TOOLS = frozenset({
     "edit_role", "kick_member", "ban_member", "unban_member", "timeout_member",
     "remove_timeout", "assign_role", "remove_role", "change_nickname",
     "send_message", "delete_message", "bulk_delete_messages", "pin_message",
-    "run_local_task",
+    "run_local_task", "write_workspace_file", "delete_workspace_file",
 })
 _YES_WORDS = frozenset({"yes", "y", "yeah", "yep", "sure", "confirm", "confirmed", "do it", "go ahead", "proceed"})
 _NO_WORDS = frozenset({"no", "n", "nope", "cancel", "stop", "don't", "do not"})

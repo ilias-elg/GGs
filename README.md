@@ -18,7 +18,7 @@ LOCAL_TASK_USER_IDS=123456789012345678
 LOCAL_TASK_WORKSPACE=C:\path\to\the\workspace
 ```
 
-Only the listed Discord user IDs can request local tasks. Commands run without a shell, stay inside `LOCAL_TASK_WORKSPACE`, have a timeout, and require a follow-up `yes` confirmation from the requesting user.
+Only the listed Discord user IDs, or a server administrator, can request local tasks. Commands run without a shell, stay inside `LOCAL_TASK_WORKSPACE`, have a timeout, and require a follow-up `yes` confirmation from the requesting user. With this enabled, Bob also gets workspace tools for listing, reading, searching, writing, and deleting files; writes and deletes require confirmation.
 
 ## Conversation controls
 
@@ -31,3 +31,5 @@ MAX_CONTEXT_MESSAGES=30
 Set `AUTO_FOLLOW_UPS=false` if Bob should only answer DMs, mentions, or messages containing his name.
 
 `FULL_DISCORD_TOOLS=true` is enabled by default. It gives Bob the complete Discord toolset in server conversations, so natural requests such as “make a new VC” and “delete the raid voice channel” are routed to the real channel-management tools. Discord permissions and confirmation gates still apply.
+
+`FULL_TOOLSET=true` is enabled by default. It exposes all built-in web, Roblox, Discord, voice, vision, calculation, and workspace tools to the model so natural language is not blocked by intent keywords. External services such as Spotify, Trello API actions, email, or other apps still require their credentials and an adapter; the local task bridge can run an authorized integration script for those services.

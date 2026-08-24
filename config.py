@@ -33,6 +33,9 @@ CONVERSATION_TTL_SECONDS: int = int(os.getenv("CONVERSATION_TTL_SECONDS", "1200"
 # "delete the raid VC" cannot be blocked by a brittle keyword classifier.
 # Tool calls are still permission-checked and mutation calls are confirmed.
 FULL_DISCORD_TOOLS: bool = os.getenv("FULL_DISCORD_TOOLS", "true").lower() == "true"
+# When true, Bob receives every tool that is available for the current
+# conversation instead of relying on keyword intent detection.
+FULL_TOOLSET: bool = os.getenv("FULL_TOOLSET", "true").lower() == "true"
 
 # ─── General outside-Discord tasks ───────────────────────────────────────────
 # Disabled by default. When enabled, only the listed Discord user IDs may ask
