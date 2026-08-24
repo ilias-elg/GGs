@@ -9,7 +9,7 @@ MONITORED_GROUPS = {
 }
 
 # Scanning and Syncing Intervals
-PRESENCE_SCAN_INTERVAL = 20  # seconds
+PRESENCE_SCAN_INTERVAL = 45  # seconds
 GROUP_SYNC_INTERVAL = 300  # 5 minutes
 
 # The only game the bot cares about
