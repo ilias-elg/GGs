@@ -42,7 +42,7 @@ ALERT_USER_ID: str = os.getenv("ALERT_USER_ID", "")
 
 # ─── Default models per provider ──────────────────────────────────────────────
 _PROVIDER_DEFAULTS: dict[str, str] = {
-    "groq": "llama-3.3-70b-versatile",
+    "groq": "llama-3.1-70b-versatile",
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-20241022",
 }
