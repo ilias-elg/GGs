@@ -174,6 +174,28 @@ ROBLOX_SCHEMAS: list[dict] = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_roblox_user",
+            "description": (
+                "Fetches comprehensive data for a specific Roblox user directly from Roblox APIs. "
+                "Returns account creation date, friends count, followers count, group memberships, "
+                "description, and whether they are banned. "
+                "Use this tool to investigate specific users, verify identities, or check if an account is an alt."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "description": "The exact Roblox username to investigate.",
+                    }
+                },
+                "required": ["username"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -244,6 +266,8 @@ async def execute_roblox_tool(name: str, args: dict, ctx: dict | None = None) ->
             return await _execute_send_dashboard(ctx or {})
         elif name == "find_player":
             return await _find_player(args.get("username", ""))
+        elif name == "analyze_roblox_user":
+            return await _analyze_roblox_user(args.get("username", ""))
         else:
             return {"error": f"Unknown Roblox tool: {name}"}
     except Exception as e:
@@ -606,3 +630,59 @@ async def _execute_send_dashboard(ctx: dict) -> dict:
         return {"sent": False, "error": "No channel available"}
     except Exception as e:
         return {"sent": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Analyze Roblox User Tool
+# ---------------------------------------------------------------------------
+
+async def _analyze_roblox_user(username: str) -> dict:
+    import aiohttp
+    import asyncio
+    if not username:
+        return {"error": "Username is required"}
+    
+    async with aiohttp.ClientSession() as session:
+        # 1. Resolve username to user ID
+        async with session.post("https://users.roblox.com/v1/usernames/users", json={"usernames": [username]}) as resp:
+            data = await resp.json()
+            if not data.get("data"):
+                return {"error": f"Roblox user '{username}' does not exist."}
+            user_info = data["data"][0]
+            user_id = user_info["id"]
+            display_name = user_info["displayName"]
+            
+        # 2. Fetch all details concurrently
+        async def fetch(url):
+            async with session.get(url) as r:
+                return await r.json() if r.status == 200 else None
+
+        info, friends, followers, followings, groups = await asyncio.gather(
+            fetch(f"https://users.roblox.com/v1/users/{user_id}"),
+            fetch(f"https://friends.roblox.com/v1/users/{user_id}/friends/count"),
+            fetch(f"https://friends.roblox.com/v1/users/{user_id}/followers/count"),
+            fetch(f"https://friends.roblox.com/v1/users/{user_id}/followings/count"),
+            fetch(f"https://groups.roblox.com/v1/users/{user_id}/groups/roles")
+        )
+
+        result = {
+            "user_id": user_id,
+            "username": username,
+            "display_name": display_name,
+            "profile_url": f"https://www.roblox.com/users/{user_id}/profile",
+        }
+        
+        if info:
+            result["created_at"] = info.get("created")
+            result["description"] = info.get("description")
+            result["is_banned"] = info.get("isBanned")
+            
+        if friends: result["friends_count"] = friends.get("count")
+        if followers: result["followers_count"] = followers.get("count")
+        if followings: result["followings_count"] = followings.get("count")
+        
+        if groups and "data" in groups:
+            result["group_count"] = len(groups["data"])
+            result["groups"] = [g["group"]["name"] for g in groups["data"]]
+            
+        return result
