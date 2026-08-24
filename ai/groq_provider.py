@@ -40,10 +40,40 @@ class GroqProvider(AIProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice
 
-        response = await self.request_with_retries(
-            lambda: self.client.chat.completions.create(**kwargs),
-            label="Groq chat request",
-        )
+        try:
+            response = await self.request_with_retries(
+                lambda: self.client.chat.completions.create(**kwargs),
+                label="Groq chat request",
+            )
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404 and "model" in str(exc).lower():
+                logger.warning(f"Model {self.model} not found. Attempting to fallback...")
+                try:
+                    models = await self.client.models.list()
+                    valid = [m.id for m in models.data if "whisper" not in m.id.lower() and "guard" not in m.id.lower() and "orpheus" not in m.id.lower()]
+                    if valid:
+                        fallback = valid[0]
+                        # Prefer larger capable models for chat
+                        for pref in ["groq/compound", "gpt-oss-120b", "qwen"]:
+                            if any(pref in m for m in valid):
+                                fallback = next(m for m in valid if pref in m)
+                                break
+                        logger.info(f"Fallback to model {fallback}")
+                        self.model = fallback
+                        kwargs["model"] = fallback
+                        response = await self.request_with_retries(
+                            lambda: self.client.chat.completions.create(**kwargs),
+                            label="Groq chat request fallback",
+                        )
+                    else:
+                        raise exc
+                except Exception as inner_exc:
+                    if inner_exc is not exc:
+                        logger.error(f"Fallback failed: {inner_exc}")
+                    raise exc
+            else:
+                raise
+
         choice = response.choices[0]
 
         tool_calls: list[ToolCall] = []
