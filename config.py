@@ -21,8 +21,8 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 
 # ─── Conversation ─────────────────────────────────────────────────────────────
-MAX_CONTEXT_MESSAGES: int = int(os.getenv("MAX_CONTEXT_MESSAGES", "30"))
-MAX_TOOL_ROUNDS: int = int(os.getenv("MAX_TOOL_ROUNDS", "10"))
+MAX_CONTEXT_MESSAGES: int = int(os.getenv("MAX_CONTEXT_MESSAGES", "5"))
+MAX_TOOL_ROUNDS: int = int(os.getenv("MAX_TOOL_ROUNDS", "5"))
 MEMORY_ENABLED: bool = os.getenv("MEMORY_ENABLED", "true").lower() == "true"
 # After Bob is addressed, keep the conversation open for natural follow-ups
 # from the same person. This avoids requiring "Bob" in every message while
@@ -32,10 +32,10 @@ CONVERSATION_TTL_SECONDS: int = int(os.getenv("CONVERSATION_TTL_SECONDS", "1200"
 # Expose every Discord tool in guild conversations so natural language such as
 # "delete the raid VC" cannot be blocked by a brittle keyword classifier.
 # Tool calls are still permission-checked and mutation calls are confirmed.
-FULL_DISCORD_TOOLS: bool = os.getenv("FULL_DISCORD_TOOLS", "true").lower() == "true"
+FULL_DISCORD_TOOLS: bool = os.getenv("FULL_DISCORD_TOOLS", "false").lower() == "true"
 # When true, Bob receives every tool that is available for the current
 # conversation instead of relying on keyword intent detection.
-FULL_TOOLSET: bool = os.getenv("FULL_TOOLSET", "true").lower() == "true"
+FULL_TOOLSET: bool = os.getenv("FULL_TOOLSET", "false").lower() == "true"
 
 # ─── General outside-Discord tasks ───────────────────────────────────────────
 # Disabled by default. When enabled, only the listed Discord user IDs may ask
