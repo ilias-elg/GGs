@@ -23,6 +23,7 @@ _ROBLOX_KEYWORDS = frozenset([
     "monitor", "universe", "concentration", "players", "in-game",
     "build", "strength", "defense", "stamina", "fireball", "damage",
     "shattered", "balance", "str", "def", "sta", "server count",
+    "dashboard", "overview", "status", "summary", "live", "intelligence",
 ])
 
 # Discord action keywords — these clearly indicate an admin operation
@@ -169,7 +170,7 @@ async def execute_tool(name: str, args: dict, ctx: dict) -> dict:
       channel_id     int
     """
     if name in ROBLOX_TOOL_NAMES:
-        return await execute_roblox_tool(name, args)
+        return await execute_roblox_tool(name, args, ctx=ctx)
     elif name in DISCORD_TOOL_NAMES:
         return await execute_discord_tool(name, args, ctx)
     elif name in WEB_TOOL_NAMES:

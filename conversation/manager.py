@@ -263,6 +263,7 @@ class ConversationManager:
 
                 # ── Agentic tool loop ────────────────────────────────────────
                 rounds = 0
+                dashboard_sent = False
                 while response.has_tool_calls and rounds < config.MAX_TOOL_ROUNDS:
                     rounds += 1
                     logger.info(
@@ -275,6 +276,9 @@ class ConversationManager:
                         logger.info(f"Executing tool: {tc.name} args={tc.arguments}")
                         result = await execute_tool(tc.name, tc.arguments, tool_ctx)
                         logger.info(f"Tool result [{tc.name}]: {json.dumps(result)[:200]}")
+
+                        if tc.name == "send_dashboard" and result.get("sent"):
+                            dashboard_sent = True
 
                         tool_results.append({
                             "role": "tool",
@@ -297,11 +301,16 @@ class ConversationManager:
 
                 # ── Extract final text ───────────────────────────────────────
                 answer = response.content or ""
-                if not answer.strip():
+
+                # If the dashboard embed was already sent, don't also send a text wall
+                if dashboard_sent:
+                    answer = ""
+                elif not answer.strip():
                     answer = "Hmm, got nothing back on that one. Try again?"
 
                 # ── Send response ────────────────────────────────────────────
-                await _send_response(message, answer)
+                if answer.strip():
+                    await _send_response(message, answer)
 
                 # ── Update history ───────────────────────────────────────────
                 mem.add_to_history(channel_id, "assistant", answer)

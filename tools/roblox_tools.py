@@ -176,7 +176,7 @@ async def _data_age_note(last_ts: int | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def execute_roblox_tool(name: str, args: dict) -> dict:
+async def execute_roblox_tool(name: str, args: dict, ctx: dict | None = None) -> dict:
     """Dispatch a Roblox monitoring tool call."""
     try:
         if name == "get_group_status":
@@ -194,6 +194,8 @@ async def execute_roblox_tool(name: str, args: dict) -> dict:
         elif name == "calculate_build_stats":
             from conversation.build_calc import calculate_stats
             return calculate_stats(int(args.get("strength", 0)))
+        elif name == "send_dashboard":
+            return await _execute_send_dashboard(ctx or {})
         else:
             return {"error": f"Unknown Roblox tool: {name}"}
     except Exception as e:
@@ -414,3 +416,38 @@ async def _get_spike_history(hours: float = 24) -> dict:
             "game": name or f"Universe {uid}",
         })
     return {"period_hours": hours, "spike_count": len(spikes), "spikes": spikes}
+
+
+# ---------------------------------------------------------------------------
+# Dashboard — sends the full rich Discord embed directly to the channel
+# ---------------------------------------------------------------------------
+
+ROBLOX_SCHEMAS.append({
+    "type": "function",
+    "function": {
+        "name": "send_dashboard",
+        "description": (
+            "Send the full FIRE NATION LIVE INTELLIGENCE DASHBOARD as a rich Discord embed. "
+            "Use this whenever the user asks for the dashboard, live stats, an overview, "
+            "or a summary of all groups. Do NOT narrate the data as text — call this tool "
+            "to send the real formatted embed."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+})
+
+ROBLOX_TOOL_NAMES.add("send_dashboard")
+
+
+async def _execute_send_dashboard(ctx: dict) -> dict:
+    """Build and send the dashboard embed directly to the channel."""
+    try:
+        from roblox_monitor.dashboard import build_dashboard_embed
+        embed = await build_dashboard_embed()
+        message = ctx.get("message")
+        if message and message.channel:
+            await message.channel.send(embed=embed)
+            return {"sent": True}
+        return {"sent": False, "error": "No channel available"}
+    except Exception as e:
+        return {"sent": False, "error": str(e)}
