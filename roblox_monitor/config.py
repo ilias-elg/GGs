@@ -9,7 +9,13 @@ MONITORED_GROUPS = {
 }
 
 # Scanning and Syncing Intervals
-PRESENCE_SCAN_INTERVAL = 45  # seconds
+# 306 tracked members require seven 50-user presence calls. At 45 seconds,
+# consecutive scans can exceed Roblox's rolling request window. Keep a safe
+# gap between scan starts and retry individual throttled batches instead.
+PRESENCE_SCAN_INTERVAL = 90  # seconds
+PRESENCE_BATCH_SIZE = 50
+PRESENCE_BATCH_DELAY_SECONDS = 2
+PRESENCE_MAX_RETRIES = 3
 GROUP_SYNC_INTERVAL = 300  # 5 minutes
 
 # The only game the bot cares about

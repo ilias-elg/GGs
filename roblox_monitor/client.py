@@ -1,6 +1,13 @@
 import aiohttp
 import asyncio
 import logging
+import re
+
+from .config import (
+    PRESENCE_BATCH_DELAY_SECONDS,
+    PRESENCE_BATCH_SIZE,
+    PRESENCE_MAX_RETRIES,
+)
 
 logger = logging.getLogger('discord')
 
@@ -10,7 +17,9 @@ class RobloxClient:
 
     async def get_session(self):
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
+            self.session = aiohttp.ClientSession(
+                headers={"User-Agent": "FireNationBot/1.0"}
+            )
         return self.session
 
     async def fetch_group_members(self, group_id):
@@ -56,34 +65,72 @@ class RobloxClient:
                 
         return users
 
+    @staticmethod
+    def _retry_after_seconds(value: str | None, attempt: int) -> float:
+        """Return a bounded retry delay from Roblox's header or backoff."""
+        if value:
+            match = re.search(r"\d+(?:\.\d+)?", value)
+            if match:
+                return min(max(float(match.group(0)), 1.0), 60.0)
+        return min(5.0 * (2 ** attempt), 60.0)
+
     async def fetch_presence(self, user_ids):
-        """Fetches presence for a list of user IDs in sequential batches to avoid rate limits."""
+        """Fetch presence sequentially, retrying only the batch Roblox throttles."""
         session = await self.get_session()
         url = "https://presence.roblox.com/v1/presence/users"
-        batch_size = 50
-        
-        batches = [user_ids[i:i+batch_size] for i in range(0, len(user_ids), batch_size)]
+        batches = [
+            user_ids[index:index + PRESENCE_BATCH_SIZE]
+            for index in range(0, len(user_ids), PRESENCE_BATCH_SIZE)
+        ]
         results = []
         
-        for batch in batches:
+        for batch_number, batch in enumerate(batches, start=1):
             payload = {"userIds": batch}
-            try:
-                async with session.post(url, json=payload) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        results.extend(data.get('userPresences', []))
-                    elif resp.status == 429:
-                        logger.warning("429 rate limit hit on presence API, aborting scan to avoid partial data.")
+            completed = False
+            for attempt in range(PRESENCE_MAX_RETRIES + 1):
+                try:
+                    async with session.post(url, json=payload) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            results.extend(data.get("userPresences", []))
+                            completed = True
+                            break
+                        if resp.status == 429:
+                            retry_after = resp.headers.get("Retry-After")
+                        else:
+                            logger.error(
+                                "Failed to fetch presence batch %s/%s: HTTP %s",
+                                batch_number,
+                                len(batches),
+                                resp.status,
+                            )
+                            return None
+                    if attempt >= PRESENCE_MAX_RETRIES:
+                        logger.warning(
+                            "Presence batch %s/%s stayed rate-limited after %s retries.",
+                            batch_number,
+                            len(batches),
+                            PRESENCE_MAX_RETRIES,
+                        )
                         return None
-                    else:
-                        logger.error(f"Failed to fetch presence: HTTP {resp.status}")
-                        return None
-            except Exception as e:
-                logger.error(f"Error fetching presence batch: {e}")
+                    delay = self._retry_after_seconds(retry_after, attempt)
+                    logger.warning(
+                        "Roblox throttled presence batch %s/%s; retrying in %.1fs (%s/%s).",
+                        batch_number,
+                        len(batches),
+                        delay,
+                        attempt + 1,
+                        PRESENCE_MAX_RETRIES,
+                    )
+                    await asyncio.sleep(delay)
+                except Exception as e:
+                    logger.error(f"Error fetching presence batch {batch_number}: {e}")
+                    return None
+
+            if not completed:
                 return None
-                
-            # Sleep 1 second between batches to avoid burst limits
-            await asyncio.sleep(1)
+            if batch_number < len(batches):
+                await asyncio.sleep(PRESENCE_BATCH_DELAY_SECONDS)
             
         return results
 
