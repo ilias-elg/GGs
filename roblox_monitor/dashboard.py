@@ -296,18 +296,29 @@ async def build_dashboard_embed() -> discord.Embed:
                 else:
                     public_server_lines.append(line)
 
+            def add_chunked_fields(title, lines):
+                current_chunk = []
+                current_len = 0
+                part = 1
+                for line in lines:
+                    if current_len + len(line) + 2 > 1000:
+                        name = title if part == 1 else f"{title} (Part {part})"
+                        embed.add_field(name=name, value="\n\n".join(current_chunk), inline=False)
+                        current_chunk = [line]
+                        current_len = len(line)
+                        part += 1
+                    else:
+                        current_chunk.append(line)
+                        current_len += len(line) + 2
+                
+                if current_chunk:
+                    name = title if part == 1 else f"{title} (Part {part})"
+                    embed.add_field(name=name, value="\n\n".join(current_chunk), inline=False)
+
             if public_server_lines:
-                embed.add_field(
-                    name="🖥️  Active Public Servers",
-                    value="\n\n".join(public_server_lines),
-                    inline=False,
-                )
+                add_chunked_fields("🖥️  Active Public Servers", public_server_lines)
             if private_server_lines:
-                embed.add_field(
-                    name="🔒  Active Private Servers",
-                    value="\n\n".join(private_server_lines),
-                    inline=False,
-                )
+                add_chunked_fields("🔒  Active Private Servers", private_server_lines)
         else:
             embed.add_field(
                 name="🖥️  Active Servers (The Shattered Balance)",
