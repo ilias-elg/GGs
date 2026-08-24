@@ -319,18 +319,18 @@ async def _get_online_hrs() -> dict:
             return {"hrs": [], "note": "No scan data yet."}
 
         # 1. Fetch memberships and deduplicate
-        async with db.execute("SELECT user_id, group_id, rank, username, role_name FROM group_members") as cur:
+        async with db.execute("SELECT user_id, group_id, rank, username, role FROM group_members") as cur:
             all_memberships = await cur.fetchall()
             
         user_best_group = {}
-        for uid, gid, rank, username, role_name in all_memberships:
+        for uid, gid, rank, username, role in all_memberships:
             if uid not in user_best_group or rank > user_best_group[uid]['rank']:
                 user_best_group[uid] = {'gid': gid, 'rank': rank, 'username': username, 'roles': []}
                 
         # Collect roles
-        for uid, gid, rank, username, role_name in all_memberships:
+        for uid, gid, rank, username, role in all_memberships:
             if uid in user_best_group:
-                user_best_group[uid]['roles'].append((gid, role_name, rank))
+                user_best_group[uid]['roles'].append((gid, role, rank))
 
         # 2. Fetch presence
         async with db.execute('''
