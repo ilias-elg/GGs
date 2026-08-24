@@ -144,6 +144,26 @@ ROBLOX_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "find_player",
+            "description": (
+                "Search for a specific Roblox player by username across all monitored groups "
+                "and return their current presence (online, in-game, which server)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "description": "The Roblox username or part of the username to search for.",
+                    }
+                },
+                "required": ["username"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "send_dashboard",
             "description": (
                 "Send the full FIRE NATION LIVE INTELLIGENCE DASHBOARD as a rich Discord embed. "
@@ -222,6 +242,8 @@ async def execute_roblox_tool(name: str, args: dict, ctx: dict | None = None) ->
             return calculate_stats(int(args.get("strength", 0)))
         elif name == "send_dashboard":
             return await _execute_send_dashboard(ctx or {})
+        elif name == "find_player":
+            return await _find_player(args.get("username", ""))
         else:
             return {"error": f"Unknown Roblox tool: {name}"}
     except Exception as e:
@@ -495,6 +517,76 @@ async def _get_spike_history(hours: float = 24) -> dict:
             "game": name or f"Universe {uid}",
         })
     return {"period_hours": hours, "spike_count": len(spikes), "spikes": spikes}
+
+
+# ---------------------------------------------------------------------------
+# Find Player Tool
+# ---------------------------------------------------------------------------
+
+async def _find_player(username: str) -> dict:
+    if not username:
+        return {"error": "Username is required"}
+    
+    async with aiosqlite.connect(DB_PATH) as db:
+        last_ts = await _latest_scan_ts(db)
+        age_note = await _data_age_note(last_ts)
+        
+        query = """
+            SELECT user_id, group_id, rank, role, username
+            FROM group_members
+            WHERE username LIKE ? OR CAST(user_id AS TEXT) = ?
+        """
+        async with db.execute(query, (f"%{username}%", username)) as cur:
+            matches = await cur.fetchall()
+            
+        if not matches:
+            return {"status": f"No player matching '{username}' found in any monitored group.", "note": age_note}
+            
+        results = []
+        for uid, gid, rank, role, uname in matches:
+            group_name = MONITORED_GROUPS.get(gid, f"Group {gid}")
+            player_info = {
+                "username": uname or str(uid),
+                "user_id": uid,
+                "group": group_name,
+                "rank": rank,
+                "role": role,
+                "status": "Offline / Unknown"
+            }
+            
+            if last_ts:
+                async with db.execute("""
+                    SELECT presence_type, universe_id, game_id
+                    FROM presence_history
+                    WHERE timestamp = ? AND user_id = ?
+                """, (last_ts, uid)) as pcur:
+                    prow = await pcur.fetchone()
+                    
+                if prow:
+                    ptype, u_id, g_id = prow
+                    if ptype == 1:
+                        player_info["status"] = "Online (Website/App)"
+                    elif ptype == 2:
+                        from roblox_monitor.config import TARGET_UNIVERSE_ID
+                        if u_id == TARGET_UNIVERSE_ID:
+                            if g_id:
+                                if "-" in g_id:
+                                    parts = g_id.split("-")
+                                    short_id = f"{parts[1]}-{parts[2]}" if len(parts) >= 3 else g_id
+                                else:
+                                    short_id = g_id
+                                player_info["status"] = f"In-game (The Shattered Balance) - Server ID: {short_id}"
+                            else:
+                                player_info["status"] = "In-game (The Shattered Balance) - Unassigned Server"
+                        else:
+                            async with db.execute("SELECT name FROM known_games WHERE universe_id = ?", (u_id,)) as gcur:
+                                grow = await gcur.fetchone()
+                                game_name = grow[0] if grow else f"Universe {u_id}"
+                            player_info["status"] = f"In-game ({game_name})"
+                            
+            results.append(player_info)
+            
+    return {"matches": results, "note": age_note}
 
 
 # ---------------------------------------------------------------------------
