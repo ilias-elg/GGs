@@ -57,48 +57,34 @@ class RobloxClient:
         return users
 
     async def fetch_presence(self, user_ids):
-        """Fetches presence for a list of user IDs in concurrent batches."""
-        import random
+        """Fetches presence for a list of user IDs in sequential batches to avoid rate limits."""
         session = await self.get_session()
         url = "https://presence.roblox.com/v1/presence/users"
         batch_size = 50
         
-        # Prevent "thundering herd" 429s by limiting to 3 concurrent requests
-        sem = asyncio.Semaphore(3)
-
-        async def fetch_batch(batch, index):
-            payload = {"userIds": batch}
-            # Add initial jitter to spread out the very first requests
-            await asyncio.sleep(index * 0.2)
-            
-            for attempt in range(5):
-                async with sem:
-                    try:
-                        async with session.post(url, json=payload) as resp:
-                            if resp.status == 429:
-                                backoff = (2 ** attempt) + random.uniform(0, 0.5)
-                                logger.warning(f"429 on presence fetch, backing off {backoff:.2f}s (attempt {attempt+1})")
-                                await asyncio.sleep(backoff)
-                                continue
-                            elif resp.status == 200:
-                                data = await resp.json()
-                                return data.get('userPresences', [])
-                            else:
-                                logger.error(f"Failed to fetch presence: HTTP {resp.status}")
-                                return []
-                    except Exception as e:
-                        logger.error(f"Error fetching presence batch: {e}")
-                        backoff = (2 ** attempt) + random.uniform(0, 0.5)
-                        await asyncio.sleep(backoff)
-            logger.error(f"Failed to fetch presence batch after 5 attempts.")
-            return []
-
         batches = [user_ids[i:i+batch_size] for i in range(0, len(user_ids), batch_size)]
-        batch_results = await asyncio.gather(*[fetch_batch(b, i) for i, b in enumerate(batches)])
-        
         results = []
-        for br in batch_results:
-            results.extend(br)
+        
+        for batch in batches:
+            payload = {"userIds": batch}
+            try:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        results.extend(data.get('userPresences', []))
+                    elif resp.status == 429:
+                        logger.warning("429 rate limit hit on presence API, aborting scan to avoid partial data.")
+                        return None
+                    else:
+                        logger.error(f"Failed to fetch presence: HTTP {resp.status}")
+                        return None
+            except Exception as e:
+                logger.error(f"Error fetching presence batch: {e}")
+                return None
+                
+            # Sleep 1 second between batches to avoid burst limits
+            await asyncio.sleep(1)
+            
         return results
 
     async def fetch_game_names(self, universe_ids):
