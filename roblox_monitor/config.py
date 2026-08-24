@@ -9,10 +9,10 @@ MONITORED_GROUPS = {
 }
 
 # Scanning and Syncing Intervals
-# 306 tracked members require seven 50-user presence calls. At 45 seconds,
-# consecutive scans can exceed Roblox's rolling request window. Keep a safe
-# gap between scan starts and retry individual throttled batches instead.
-PRESENCE_SCAN_INTERVAL = 90  # seconds
+# 307 tracked members require seven 50-user presence calls. A 70-second
+# cadence keeps every rolling minute below Roblox's ten-request limit while
+# keeping the dashboard within roughly one minute of live data.
+PRESENCE_SCAN_INTERVAL = 70  # seconds
 PRESENCE_BATCH_SIZE = 50
 PRESENCE_BATCH_DELAY_SECONDS = 2
 # Only retry when Roblox explicitly provides a short Retry-After. A shared

@@ -27,6 +27,7 @@ class MonitorTasks:
         self.last_scan_status = "Not started"
         self.tracked_users_count = 0
         self._initial_group_sync_finished = asyncio.Event()
+        self._roblox_api_lock = asyncio.Lock()
         
         self.sync_groups.start()
         self.scan_presence.start()
@@ -44,7 +45,9 @@ class MonitorTasks:
                 all_users = set()
                 
                 for group_id in MONITORED_GROUPS:
-                    members = await self.client.fetch_group_members(group_id)
+                    # Do not overlap group sync traffic with the presence API.
+                    async with self._roblox_api_lock:
+                        members = await self.client.fetch_group_members(group_id)
                     # Use `is None` to check for failure vs empty list
                     if members is None:
                         logger.error(f"Group sync failed for {group_id}, skipping DB wipe")
@@ -99,7 +102,11 @@ class MonitorTasks:
                     return
                     
                 # 2. Fetch presence
-                presences = await self.client.fetch_presence(user_ids)
+                # A full presence scan owns Roblox API access until all seven
+                # batches finish, preventing a group-sync burst from causing
+                # a mid-scan throttle.
+                async with self._roblox_api_lock:
+                    presences = await self.client.fetch_presence(user_ids)
                 if not presences:
                     self.last_scan_status = "FAILED"
                     return
