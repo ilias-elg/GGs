@@ -654,10 +654,16 @@ async def _execute_send_dashboard(ctx: dict) -> dict:
     """Build and send the dashboard embed directly to the channel."""
     try:
         from roblox_monitor.dashboard import build_dashboard_embed
+        from roblox_monitor.db import DB_PATH
+        import aiosqlite
         embed = await build_dashboard_embed()
         message = ctx.get("message")
         if message and message.channel:
-            await message.channel.send(embed=embed)
+            sent_msg = await message.channel.send(embed=embed)
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("INSERT OR REPLACE INTO bot_status (key, value) VALUES ('live_dash_channel', ?)", (str(sent_msg.channel.id),))
+                await db.execute("INSERT OR REPLACE INTO bot_status (key, value) VALUES ('live_dash_msg', ?)", (str(sent_msg.id),))
+                await db.commit()
             return {"sent": True}
         return {"sent": False, "error": "No channel available"}
     except Exception as e:

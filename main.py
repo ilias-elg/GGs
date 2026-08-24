@@ -141,8 +141,17 @@ async def on_ready():
 async def dashboard_cmd(ctx):
     """Sends the live Roblox dashboard instantly, bypassing the AI."""
     from roblox_monitor.dashboard import build_dashboard_embed
+    from roblox_monitor.db import DB_PATH
+    import aiosqlite
+    
     embed = await build_dashboard_embed()
-    await ctx.send(embed=embed)
+    msg = await ctx.send(embed=embed)
+    
+    # Save to db so monitor.py can auto-update it
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR REPLACE INTO bot_status (key, value) VALUES ('live_dash_channel', ?)", (str(msg.channel.id),))
+        await db.execute("INSERT OR REPLACE INTO bot_status (key, value) VALUES ('live_dash_msg', ?)", (str(msg.id),))
+        await db.commit()
 
 
 @bot.event

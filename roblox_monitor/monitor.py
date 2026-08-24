@@ -203,7 +203,7 @@ class MonitorTasks:
         except Exception as e:
             logger.error(f"Failed to check live dashboard: {e}")
 
-    @tasks.loop(seconds=20)
+    @tasks.loop(seconds=2)
     async def dashboard_updater(self):
         try:
             async with aiosqlite.connect(DB_PATH, timeout=15.0) as db:
