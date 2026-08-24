@@ -8,6 +8,7 @@ from datetime import datetime
 
 from .config import (
     MONITORED_GROUPS, PRESENCE_SCAN_INTERVAL, GROUP_SYNC_INTERVAL,
+    PRESENCE_STARTUP_DELAY_SECONDS,
     TARGET_UNIVERSE_ID,
     SPIKE_WINDOW_SECONDS, ALERT_THRESHOLD_INFO, ALERT_THRESHOLD_WARNING,
     ALERT_THRESHOLD_HIGH, ALERT_THRESHOLD_CRITICAL, ALERT_PERCENT_INFO,
@@ -25,6 +26,7 @@ class MonitorTasks:
         self.last_scan_time = 0
         self.last_scan_status = "Not started"
         self.tracked_users_count = 0
+        self._initial_group_sync_finished = asyncio.Event()
         
         self.sync_groups.start()
         self.scan_presence.start()
@@ -71,6 +73,8 @@ class MonitorTasks:
                 
         except Exception as e:
             logger.error(f"Error in group sync: {e}")
+        finally:
+            self._initial_group_sync_finished.set()
 
     @sync_groups.before_loop
     async def before_sync(self):
@@ -196,8 +200,9 @@ class MonitorTasks:
     @scan_presence.before_loop
     async def before_scan(self):
         await self.bot.wait_until_ready()
-        # Wait a bit so group sync can run first if it's the very first startup
-        await asyncio.sleep(5)
+        # Let Roblox group-sync traffic settle before the first presence call.
+        await self._initial_group_sync_finished.wait()
+        await asyncio.sleep(PRESENCE_STARTUP_DELAY_SECONDS)
 
     async def analyze_spikes(self, db, now):
         window_start = now - SPIKE_WINDOW_SECONDS

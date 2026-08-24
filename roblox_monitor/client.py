@@ -2,11 +2,14 @@ import aiohttp
 import asyncio
 import logging
 import re
+import time
 
 from .config import (
     PRESENCE_BATCH_DELAY_SECONDS,
     PRESENCE_BATCH_SIZE,
+    PRESENCE_429_COOLDOWN_SECONDS,
     PRESENCE_MAX_RETRIES,
+    ROBLOX_PROXY_URL,
 )
 
 logger = logging.getLogger('discord')
@@ -14,6 +17,11 @@ logger = logging.getLogger('discord')
 class RobloxClient:
     def __init__(self):
         self.session = None
+        self._presence_blocked_until = 0.0
+
+    @property
+    def _request_options(self) -> dict:
+        return {"proxy": ROBLOX_PROXY_URL} if ROBLOX_PROXY_URL else {}
 
     async def get_session(self):
         if self.session is None or self.session.closed:
@@ -35,7 +43,7 @@ class RobloxClient:
                 params["cursor"] = cursor
                 
             try:
-                async with session.get(url, params=params) as resp:
+                async with session.get(url, params=params, **self._request_options) as resp:
                     if resp.status == 429:
                         await asyncio.sleep(5)
                         continue
@@ -78,6 +86,13 @@ class RobloxClient:
         """Fetch presence sequentially, retrying only the batch Roblox throttles."""
         session = await self.get_session()
         url = "https://presence.roblox.com/v1/presence/users"
+        remaining_cooldown = self._presence_blocked_until - time.monotonic()
+        if remaining_cooldown > 0:
+            logger.info(
+                "Skipping presence scan; Roblox cooldown has %.0fs remaining.",
+                remaining_cooldown,
+            )
+            return None
         batches = [
             user_ids[index:index + PRESENCE_BATCH_SIZE]
             for index in range(0, len(user_ids), PRESENCE_BATCH_SIZE)
@@ -89,7 +104,7 @@ class RobloxClient:
             completed = False
             for attempt in range(PRESENCE_MAX_RETRIES + 1):
                 try:
-                    async with session.post(url, json=payload) as resp:
+                    async with session.post(url, json=payload, **self._request_options) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             results.extend(data.get("userPresences", []))
@@ -106,11 +121,28 @@ class RobloxClient:
                             )
                             return None
                     if attempt >= PRESENCE_MAX_RETRIES:
+                        self._presence_blocked_until = (
+                            time.monotonic() + PRESENCE_429_COOLDOWN_SECONDS
+                        )
                         logger.warning(
-                            "Presence batch %s/%s stayed rate-limited after %s retries.",
+                            "Roblox blocked presence batch %s/%s; skipping this scan and "
+                            "cooling down for %ss. If this repeats, configure ROBLOX_PROXY_URL "
+                            "or use a host with a dedicated outbound IP.",
                             batch_number,
                             len(batches),
-                            PRESENCE_MAX_RETRIES,
+                            PRESENCE_429_COOLDOWN_SECONDS,
+                        )
+                        return None
+                    if not retry_after:
+                        self._presence_blocked_until = (
+                            time.monotonic() + PRESENCE_429_COOLDOWN_SECONDS
+                        )
+                        logger.warning(
+                            "Roblox returned a bare 429 for presence batch %s/%s; skipping "
+                            "this scan instead of waiting. Cooldown: %ss.",
+                            batch_number,
+                            len(batches),
+                            PRESENCE_429_COOLDOWN_SECONDS,
                         )
                         return None
                     delay = self._retry_after_seconds(retry_after, attempt)
@@ -147,7 +179,7 @@ class RobloxClient:
         
         names = {}
         try:
-            async with session.get(url, params=params) as resp:
+            async with session.get(url, params=params, **self._request_options) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     for item in data.get('data', []):
