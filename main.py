@@ -137,6 +137,14 @@ async def on_ready():
     logger.info(f"Bot ready. Provider={config.AI_PROVIDER}, model={config.get_model()}")
 
 
+@bot.command(name="dashboard")
+async def dashboard_cmd(ctx):
+    """Sends the live Roblox dashboard instantly, bypassing the AI."""
+    from roblox_monitor.dashboard import build_dashboard_embed
+    embed = await build_dashboard_embed()
+    await ctx.send(embed=embed)
+
+
 @bot.event
 async def on_message(message: discord.Message):
     # Never respond to bots (including ourselves)
