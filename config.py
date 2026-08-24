@@ -42,7 +42,7 @@ ALERT_USER_ID: str = os.getenv("ALERT_USER_ID", "")
 
 # ─── Default models per provider ──────────────────────────────────────────────
 _PROVIDER_DEFAULTS: dict[str, str] = {
-    "groq": "llama-3.1-70b-versatile",
+    "groq": "openai/gpt-oss-120b",
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-20241022",
 }
@@ -50,7 +50,7 @@ _PROVIDER_DEFAULTS: dict[str, str] = {
 
 def get_model() -> str:
     """Return the configured model, falling back to the provider's recommended default."""
-    return AI_MODEL or _PROVIDER_DEFAULTS.get(AI_PROVIDER, "llama-3.3-70b-versatile")
+    return AI_MODEL or _PROVIDER_DEFAULTS.get(AI_PROVIDER, "openai/gpt-oss-120b")
 
 
 # Fast/cheap model used for background tasks (memory extraction, summarization).
@@ -58,7 +58,7 @@ def get_model() -> str:
 AI_BACKGROUND_MODEL: str = os.getenv("AI_BACKGROUND_MODEL", "")
 
 _BACKGROUND_DEFAULTS: dict[str, str] = {
-    "groq": "llama-3.1-8b-instant",   # extremely fast + cheap on Groq
+    "groq": "openai/gpt-oss-20b",   # smaller/faster model for cheap background calls
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-haiku-20240307",
 }
