@@ -62,6 +62,17 @@ ROBLOX_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "get_online_hrs",
+            "description": (
+                "Returns a list of High Ranks (HRs) who are currently online or in-game "
+                "across all monitored groups. Use this when the user asks about HR presence."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_server_concentrations",
             "description": (
                 "Returns detected same-server clusters: groups of monitored members "
@@ -196,6 +207,8 @@ async def execute_roblox_tool(name: str, args: dict, ctx: dict | None = None) ->
             return await _get_group_status(args.get("group_name", ""))
         elif name == "get_all_group_status":
             return await _get_all_group_status()
+        elif name == "get_online_hrs":
+            return await _get_online_hrs()
         elif name == "get_active_games":
             return await _get_active_games()
         elif name == "get_server_concentrations":
@@ -218,6 +231,59 @@ async def execute_roblox_tool(name: str, args: dict, ctx: dict | None = None) ->
 # ---------------------------------------------------------------------------
 # Implementations
 # ---------------------------------------------------------------------------
+
+from roblox_monitor.dashboard import HR_THRESHOLDS
+
+async def _get_online_hrs() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        last_ts = await _latest_scan_ts(db)
+        if last_ts is None:
+            return {"hrs": [], "note": "No scan data yet."}
+
+        # 1. Fetch memberships and deduplicate
+        async with db.execute("SELECT user_id, group_id, rank, username, role_name FROM group_members") as cur:
+            all_memberships = await cur.fetchall()
+            
+        user_best_group = {}
+        for uid, gid, rank, username, role_name in all_memberships:
+            if uid not in user_best_group or rank > user_best_group[uid]['rank']:
+                user_best_group[uid] = {'gid': gid, 'rank': rank, 'username': username, 'roles': []}
+                
+        # Collect roles
+        for uid, gid, rank, username, role_name in all_memberships:
+            if uid in user_best_group:
+                user_best_group[uid]['roles'].append((gid, role_name, rank))
+
+        # 2. Fetch presence
+        async with db.execute('''
+            SELECT user_id, presence_type, game_id 
+            FROM presence_history 
+            WHERE timestamp = ?
+        ''', (last_ts,)) as cur:
+            presences = await cur.fetchall()
+            
+        hrs_online = []
+        for uid, ptype, game_id in presences:
+            if uid in user_best_group:
+                data = user_best_group[uid]
+                gid = data['gid']
+                rank = data['rank']
+                username = data['username'] or str(uid)
+                
+                threshold = HR_THRESHOLDS.get(gid, 999)
+                if rank >= threshold:
+                    # They are an HR in their main group
+                    hr_roles = [r[1] for r in data['roles'] if r[2] >= HR_THRESHOLDS.get(r[0], 999)]
+                    status = "In-game" if ptype == 2 else "Online"
+                    hrs_online.append({
+                        "username": username,
+                        "main_group": MONITORED_GROUPS.get(gid, str(gid)),
+                        "hr_roles": hr_roles,
+                        "status": status,
+                        "job_id": game_id
+                    })
+                    
+        return {"online_hrs": hrs_online, "total": len(hrs_online), "note": await _data_age_note(last_ts)}
 
 
 async def _get_group_status(group_name: str) -> dict:

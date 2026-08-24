@@ -24,6 +24,7 @@ _ROBLOX_KEYWORDS = frozenset([
     "build", "strength", "defense", "stamina", "fireball", "damage",
     "shattered", "balance", "str", "def", "sta", "server count",
     "dashboard", "overview", "status", "summary", "live", "intelligence",
+    "hr", "hrs", "high rank", "high ranks", "officer", "officers"
 ])
 
 # Discord action keywords — these clearly indicate an admin operation
