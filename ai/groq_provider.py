@@ -17,6 +17,7 @@ class GroqProvider(AIProvider):
         self.client = AsyncOpenAI(
             base_url=_GROQ_BASE_URL,
             api_key=config.GROQ_API_KEY,
+            max_retries=0,
         )
         self.model = config.get_model()
         logger.info(f"GroqProvider initialized with model: {self.model}")
@@ -39,7 +40,10 @@ class GroqProvider(AIProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice
 
-        response = await self.client.chat.completions.create(**kwargs)
+        response = await self.request_with_retries(
+            lambda: self.client.chat.completions.create(**kwargs),
+            label="Groq chat request",
+        )
         choice = response.choices[0]
 
         tool_calls: list[ToolCall] = []

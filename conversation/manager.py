@@ -357,6 +357,15 @@ class ConversationManager:
                             "content": json.dumps(result, ensure_ascii=False),
                         })
 
+                    # send_dashboard already delivered the user-visible
+                    # response. A second model call adds latency and can hit
+                    # Groq's RPM/TPM limit for no benefit.
+                    if dashboard_sent and all(
+                        tc.name == "send_dashboard" for tc in response.tool_calls
+                    ):
+                        response = AIResponse(content=None)
+                        break
+
                     # Append assistant's tool call message + results
                     messages.append(_build_assistant_message(response))
                     messages.extend(tool_results)
@@ -397,6 +406,12 @@ class ConversationManager:
             except Exception as e:
                 logger.error(f"ConversationManager error: {e}", exc_info=True)
                 try:
-                    await message.reply(f"Something went wrong on my end: {e}")
+                    if getattr(e, "status_code", None) == 429:
+                        await message.reply(
+                            "Groq is rate-limiting requests right now. "
+                            "I already retried with backoff; please try again in a few seconds."
+                        )
+                    else:
+                        await message.reply(f"Something went wrong on my end: {e}")
                 except Exception:
                     pass

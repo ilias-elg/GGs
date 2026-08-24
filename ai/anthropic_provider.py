@@ -25,7 +25,7 @@ class AnthropicProvider(AIProvider):
             raise ImportError(
                 "anthropic package not installed. Run: pip install anthropic"
             )
-        self.client = self._sdk.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
+        self.client = self._sdk.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=0)
         self.model = config.get_model()
         logger.info(f"AnthropicProvider initialized with model: {self.model}")
 
@@ -115,7 +115,10 @@ class AnthropicProvider(AIProvider):
             kwargs["tools"] = self._convert_tools(tools)
             kwargs["tool_choice"] = {"type": "auto"} if tool_choice == "auto" else {"type": "any"}
 
-        response = await self.client.messages.create(**kwargs)
+        response = await self.request_with_retries(
+            lambda: self.client.messages.create(**kwargs),
+            label="Anthropic chat request",
+        )
 
         content_text: str | None = None
         tool_calls: list[ToolCall] = []

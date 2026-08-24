@@ -12,7 +12,7 @@ logger = logging.getLogger("discord")
 
 class OpenAIProvider(AIProvider):
     def __init__(self) -> None:
-        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY, max_retries=0)
         self.model = config.get_model()
         logger.info(f"OpenAIProvider initialized with model: {self.model}")
 
@@ -34,7 +34,10 @@ class OpenAIProvider(AIProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice
 
-        response = await self.client.chat.completions.create(**kwargs)
+        response = await self.request_with_retries(
+            lambda: self.client.chat.completions.create(**kwargs),
+            label="OpenAI chat request",
+        )
         choice = response.choices[0]
 
         tool_calls: list[ToolCall] = []
