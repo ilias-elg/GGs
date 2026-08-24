@@ -52,7 +52,8 @@ _DISCORD_SECONDARY_KEYWORDS = frozenset([
     "channel", "role", "category", "permissions", "perm",
     "server info", "server settings", "member info", "role info",
     "private", "restrict", "allow", "deny",
-    "nickname", "nick", "staff", "mod", "admin",
+    "nickname", "nick", "staff", "mod", "admin", "vc", "voice",
+    "voice channel", "text channel", "forum channel",
 ])
 
 _WEB_KEYWORDS = frozenset([
@@ -141,8 +142,13 @@ def get_tools_for_context(
     if wants_vision or "image" in lower or "screenshot" in lower or "pic" in lower:
         schemas.extend(VISION_SCHEMAS)
 
-    # Discord admin tools — only when the request is clearly administrative
-    if wants_discord:
+    # In guilds, expose the complete Discord toolset by default. This is more
+    # reliable than asking a keyword classifier to understand every phrasing
+    # ("make a new VC", "remove the raid voice", etc.). The model still
+    # chooses whether to call a tool, and executors enforce permissions.
+    if in_guild and config.FULL_DISCORD_TOOLS:
+        schemas.extend(DISCORD_SCHEMAS)
+    elif wants_discord:
         schemas.extend(_MODERATION_SCHEMAS)
 
     # Discord info tools — include in guilds if user seems to be asking about server state
@@ -151,7 +157,7 @@ def get_tools_for_context(
         schemas.extend(_INFO_SCHEMAS)
 
     # Voice — join/leave vc
-    if wants_voice:
+    if wants_voice and not (in_guild and config.FULL_DISCORD_TOOLS):
         schemas.extend(_VOICE_SCHEMAS)
 
     # Deduplicate while preserving order

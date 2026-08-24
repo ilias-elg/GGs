@@ -29,3 +29,5 @@ MAX_CONTEXT_MESSAGES=30
 ```
 
 Set `AUTO_FOLLOW_UPS=false` if Bob should only answer DMs, mentions, or messages containing his name.
+
+`FULL_DISCORD_TOOLS=true` is enabled by default. It gives Bob the complete Discord toolset in server conversations, so natural requests such as “make a new VC” and “delete the raid voice channel” are routed to the real channel-management tools. Discord permissions and confirmation gates still apply.

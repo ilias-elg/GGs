@@ -29,6 +29,10 @@ MEMORY_ENABLED: bool = os.getenv("MEMORY_ENABLED", "true").lower() == "true"
 # preventing the bot from replying to every message in a busy channel.
 AUTO_FOLLOW_UPS: bool = os.getenv("AUTO_FOLLOW_UPS", "true").lower() == "true"
 CONVERSATION_TTL_SECONDS: int = int(os.getenv("CONVERSATION_TTL_SECONDS", "1200"))
+# Expose every Discord tool in guild conversations so natural language such as
+# "delete the raid VC" cannot be blocked by a brittle keyword classifier.
+# Tool calls are still permission-checked and mutation calls are confirmed.
+FULL_DISCORD_TOOLS: bool = os.getenv("FULL_DISCORD_TOOLS", "true").lower() == "true"
 
 # ─── General outside-Discord tasks ───────────────────────────────────────────
 # Disabled by default. When enabled, only the listed Discord user IDs may ask
