@@ -11,6 +11,7 @@ No hardcoded channel IDs. Bot works server-wide.
 
 import asyncio
 import logging
+import re
 import discord
 from discord.ext import commands
 
@@ -87,9 +88,12 @@ def _is_addressed_to_bob(message: discord.Message) -> bool:
     # @mention
     if bot.user and bot.user in message.mentions:
         return True
+    from conversation import memory as mem
+    if mem.is_conversation_active(message.channel.id, message.author.id):
+        return True
     # Name mention (case-insensitive, word boundary)
     content_lower = message.content.lower()
-    if "bob" in content_lower:
+    if re.search(r"\bbob\b", content_lower):
         return True
     return False
 
@@ -149,6 +153,15 @@ async def on_message(message: discord.Message):
 
     if not _is_addressed_to_bob(message):
         await bot.process_commands(message)
+        return
+
+    from conversation import memory as mem
+    mem.activate_conversation(message.channel.id, message.author.id)
+
+    # A natural way to end a conversation without needing a command.
+    if content.lower().strip() in {"stop", "stop talking", "end conversation", "goodbye", "bye bob"}:
+        mem.end_conversation(message.channel.id)
+        await message.reply("Got it — I’ll stay quiet until you call me again.")
         return
 
     if not content:

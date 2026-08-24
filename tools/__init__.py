@@ -12,6 +12,13 @@ from .roblox_tools import ROBLOX_SCHEMAS, ROBLOX_TOOL_NAMES, execute_roblox_tool
 from .discord_tools import DISCORD_SCHEMAS, DISCORD_TOOL_NAMES, execute_discord_tool
 from .web_tools import WEB_SCHEMAS, WEB_TOOL_NAMES, execute_web_tool
 from .vision_tools import VISION_SCHEMAS, VISION_TOOL_NAMES, execute_vision_tool
+from .general_tools import (
+    GENERAL_SCHEMAS,
+    GENERAL_TOOL_NAMES,
+    LOCAL_TASK_SCHEMA,
+    execute_general_tool,
+)
+import config
 
 # ---------------------------------------------------------------------------
 # Intent detection — keyword sets for each tool category
@@ -113,6 +120,13 @@ def get_tools_for_context(
 
     schemas: list[dict] = []
 
+    # Deterministic tools are always available, so the model can execute
+    # arithmetic and time questions instead of guessing. The optional local
+    # runner is only exposed when explicitly enabled in configuration.
+    schemas.extend(GENERAL_SCHEMAS)
+    if config.LOCAL_TASKS_ENABLED:
+        schemas.append(LOCAL_TASK_SCHEMA)
+
     # Always include Roblox tools — most queries in this server are Roblox-related
     schemas.extend(ROBLOX_SCHEMAS)
 
@@ -154,7 +168,9 @@ def get_tools_for_context(
 
 def get_all_schemas(in_guild: bool = True) -> list[dict]:
     """Return ALL tool schemas. Prefer get_tools_for_context() to save tokens."""
-    schemas = list(ROBLOX_SCHEMAS) + list(WEB_SCHEMAS) + list(VISION_SCHEMAS)
+    schemas = list(GENERAL_SCHEMAS) + list(ROBLOX_SCHEMAS) + list(WEB_SCHEMAS) + list(VISION_SCHEMAS)
+    if config.LOCAL_TASKS_ENABLED:
+        schemas.append(LOCAL_TASK_SCHEMA)
     if in_guild:
         schemas += list(DISCORD_SCHEMAS)
     return schemas
@@ -172,6 +188,8 @@ async def execute_tool(name: str, args: dict, ctx: dict) -> dict:
     """
     if name in ROBLOX_TOOL_NAMES:
         return await execute_roblox_tool(name, args, ctx=ctx)
+    elif name in GENERAL_TOOL_NAMES:
+        return await execute_general_tool(name, args, ctx)
     elif name in DISCORD_TOOL_NAMES:
         return await execute_discord_tool(name, args, ctx)
     elif name in WEB_TOOL_NAMES:

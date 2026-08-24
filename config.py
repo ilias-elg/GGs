@@ -21,9 +21,29 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 
 # ─── Conversation ─────────────────────────────────────────────────────────────
-MAX_CONTEXT_MESSAGES: int = int(os.getenv("MAX_CONTEXT_MESSAGES", "20"))
+MAX_CONTEXT_MESSAGES: int = int(os.getenv("MAX_CONTEXT_MESSAGES", "30"))
 MAX_TOOL_ROUNDS: int = int(os.getenv("MAX_TOOL_ROUNDS", "10"))
 MEMORY_ENABLED: bool = os.getenv("MEMORY_ENABLED", "true").lower() == "true"
+# After Bob is addressed, keep the conversation open for natural follow-ups
+# from the same person. This avoids requiring "Bob" in every message while
+# preventing the bot from replying to every message in a busy channel.
+AUTO_FOLLOW_UPS: bool = os.getenv("AUTO_FOLLOW_UPS", "true").lower() == "true"
+CONVERSATION_TTL_SECONDS: int = int(os.getenv("CONVERSATION_TTL_SECONDS", "1200"))
+
+# ─── General outside-Discord tasks ───────────────────────────────────────────
+# Disabled by default. When enabled, only the listed Discord user IDs may ask
+# Bob to run a single, non-shell command inside the configured workspace.
+LOCAL_TASKS_ENABLED: bool = os.getenv("LOCAL_TASKS_ENABLED", "false").lower() == "true"
+LOCAL_TASK_WORKSPACE: str = os.getenv(
+    "LOCAL_TASK_WORKSPACE",
+    os.path.dirname(os.path.abspath(__file__)),
+)
+LOCAL_TASK_USER_IDS: frozenset[int] = frozenset(
+    int(value.strip())
+    for value in os.getenv("LOCAL_TASK_USER_IDS", "").split(",")
+    if value.strip().isdigit()
+)
+LOCAL_TASK_TIMEOUT_SECONDS: int = int(os.getenv("LOCAL_TASK_TIMEOUT_SECONDS", "30"))
 
 # ─── Web Search ───────────────────────────────────────────────────────────────
 WEB_SEARCH_ENABLED: bool = os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"

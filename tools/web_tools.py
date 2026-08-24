@@ -77,6 +77,8 @@ WEB_TOOL_NAMES: frozenset[str] = frozenset(s["function"]["name"] for s in WEB_SC
 
 
 async def execute_web_tool(name: str, args: dict) -> dict:
+    if not config.WEB_SEARCH_ENABLED:
+        return {"error": "Web tools are disabled in configuration."}
     if name == "web_search":
         return await web_search(
             args.get("query", ""),

@@ -25,7 +25,7 @@ from collections import defaultdict
 import discord
 
 import config
-from ai.base import AIProvider, AIResponse
+from ai.base import AIProvider, AIResponse, ToolCall
 from conversation import memory as mem
 from conversation.context import build_context
 from tools import get_tools_for_context, execute_tool
@@ -38,6 +38,19 @@ logger = logging.getLogger("discord")
 
 _bg_provider: AIProvider | None = None
 
+# These tools can create irreversible or externally visible side effects.
+# The model may propose them, but the manager—not the model—owns confirmation.
+_CONFIRMATION_TOOLS = frozenset({
+    "create_channel", "delete_channel", "rename_channel", "edit_channel",
+    "create_category", "set_channel_permissions", "create_role", "delete_role",
+    "edit_role", "kick_member", "ban_member", "unban_member", "timeout_member",
+    "remove_timeout", "assign_role", "remove_role", "change_nickname",
+    "send_message", "delete_message", "bulk_delete_messages", "pin_message",
+    "run_local_task",
+})
+_YES_WORDS = frozenset({"yes", "y", "yeah", "yep", "sure", "confirm", "confirmed", "do it", "go ahead", "proceed"})
+_NO_WORDS = frozenset({"no", "n", "nope", "cancel", "stop", "don't", "do not"})
+
 
 def _get_bg_provider() -> AIProvider:
     """
@@ -46,16 +59,12 @@ def _get_bg_provider() -> AIProvider:
     """
     global _bg_provider
     if _bg_provider is None:
-        import config
-        from ai.groq_provider import GroqProvider
-
-        class _BgProvider(GroqProvider):
-            def __init__(self):
-                super().__init__()
-                self.model = config.get_background_model()
-
         try:
-            _bg_provider = _BgProvider()
+            # Reuse the configured provider so OpenAI and Anthropic installs
+            # do not unexpectedly attempt a Groq request in the background.
+            from ai import create_provider
+            _bg_provider = create_provider()
+            _bg_provider.model = config.get_background_model()
         except Exception:
             # If background provider fails, fall back to None (caller will skip)
             pass
@@ -215,11 +224,63 @@ class ConversationManager:
         # Per-channel lock ensures messages in the same channel are processed
         # one at a time, preventing context corruption from concurrent requests.
         self._locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._pending_confirmations: dict[tuple[int, int], list[ToolCall]] = {}
+
+    @staticmethod
+    def _is_confirmation(content: str, words: frozenset[str]) -> bool:
+        normalized = " ".join(content.lower().strip().split())
+        return normalized in words or any(normalized.startswith(f"{word} ") for word in words if " " in word)
+
+    @staticmethod
+    def _describe_pending(calls: list[ToolCall]) -> str:
+        descriptions = []
+        for call in calls:
+            if call.name == "run_local_task":
+                descriptions.append(f"run `{call.arguments.get('command', '')}` locally")
+            else:
+                args = ", ".join(f"{key}={value}" for key, value in call.arguments.items() if key != "reason")
+                descriptions.append(f"{call.name.replace('_', ' ')}" + (f" ({args})" if args else ""))
+        return "; ".join(descriptions)
+
+    async def _execute_confirmed(
+        self, message: discord.Message, calls: list[ToolCall], tool_ctx: dict
+    ) -> None:
+        results = []
+        for call in calls:
+            result = await execute_tool(call.name, call.arguments, tool_ctx)
+            if result.get("success") or result.get("sent"):
+                results.append(f"{call.name.replace('_', ' ')}: {result.get('result', 'completed')}")
+            else:
+                results.append(f"{call.name.replace('_', ' ')}: failed — {result.get('error', 'unknown error')}")
+        answer = "Done — " + "\n".join(results)
+        await _send_response(message, answer)
+        mem.add_to_history(message.channel.id, "assistant", answer)
+        mem.activate_conversation(message.channel.id, message.author.id)
 
     async def handle(self, message: discord.Message, content: str) -> None:
         """Entry point — acquires per-channel lock, then runs the agent loop."""
         channel_id = message.channel.id
         async with self._locks[channel_id]:
+            key = (channel_id, message.author.id)
+            pending = self._pending_confirmations.get(key)
+            if pending:
+                if self._is_confirmation(content, _YES_WORDS):
+                    self._pending_confirmations.pop(key, None)
+                    tool_ctx = {
+                        "message": message,
+                        "bot": self.bot,
+                        "voice_manager": self.voice_manager,
+                        "channel_id": channel_id,
+                    }
+                    async with message.channel.typing():
+                        await self._execute_confirmed(message, pending, tool_ctx)
+                    return
+                if self._is_confirmation(content, _NO_WORDS):
+                    self._pending_confirmations.pop(key, None)
+                    await message.reply("Canceled — I didn’t change anything.")
+                    return
+                # A new request supersedes an unanswered confirmation.
+                self._pending_confirmations.pop(key, None)
             await self._agent_loop(message, content)
 
     async def _agent_loop(self, message: discord.Message, content: str) -> None:
@@ -273,6 +334,16 @@ class ConversationManager:
                     # Execute all tool calls in this round
                     tool_results: list[dict] = []
                     for tc in response.tool_calls:
+                        if tc.name in _CONFIRMATION_TOOLS:
+                            key = (channel_id, user_id)
+                            self._pending_confirmations[key] = list(response.tool_calls)
+                            prompt = self._describe_pending(response.tool_calls)
+                            await message.reply(
+                                f"I’m ready to {prompt}. This will make a real change. "
+                                "Reply **yes** to confirm or **no** to cancel."
+                            )
+                            mem.add_to_history(channel_id, "assistant", f"Confirmation requested: {prompt}")
+                            return
                         logger.info(f"Executing tool: {tc.name} args={tc.arguments}")
                         result = await execute_tool(tc.name, tc.arguments, tool_ctx)
                         logger.info(f"Tool result [{tc.name}]: {json.dumps(result)[:200]}")
@@ -311,6 +382,7 @@ class ConversationManager:
                 # ── Send response ────────────────────────────────────────────
                 if answer.strip():
                     await _send_response(message, answer)
+                    mem.activate_conversation(channel_id, user_id)
 
                 # ── Update history ───────────────────────────────────────────
                 mem.add_to_history(channel_id, "assistant", answer)

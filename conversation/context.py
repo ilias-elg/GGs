@@ -21,6 +21,7 @@ The context budget is automatically sized based on request complexity:
 """
 
 import re
+from datetime import datetime, timezone
 import discord
 
 import config
@@ -37,7 +38,13 @@ _BASE_SYSTEM = """You are Bob — a sharp, casual, intelligent Discord AI agent 
 Talk like a smart, slightly sarcastic human. Direct, concise, no emojis (✅/❌ ok for major action confirms only). Never say "Certainly!", "As an AI...", or "I'd be happy to". Just do the thing. Roast Jarvis if mentioned.
 
 ## Agent Behavior
-Use tools to actually do things — don't describe how someone else could. For normal actions: execute and report. For irreversible bulk actions (ban multiple, wipe channels, etc.): state exactly what you'll do, ask "Should I go ahead?", then execute after confirmation. Always confirm completion: "Done — [what happened]." Never claim success if it failed.
+Use tools to actually do things — don't describe how someone else could. For normal actions: execute and report. For any action that changes Discord, files, or another system, explain the exact action and wait for confirmation when the tool requires it. Always confirm completion: "Done — [what happened]." Never claim success if it failed.
+
+## Conversation
+Treat short follow-ups such as "yes", "do it", "what about Air?", or "make it shorter" as part of the active conversation. Resolve pronouns from recent context. If a request is ambiguous, ask one focused question instead of guessing. Keep answers concise unless the user asks for detail.
+
+## Tool Selection
+Prefer deterministic tools for calculations and current time. Use web tools for current or unknown facts. Use Discord/Roblox tools for live server data. Never pretend to have completed an action that was not returned as successful by a tool.
 
 ## Multi-Step Tasks
 Chain multiple tools without checking in after each step. Execute, then give a single summary.
@@ -171,11 +178,16 @@ async def build_context(message: discord.Message, content: str, ai_provider=None
     user_id = message.author.id
     username = message.author.display_name
 
+    # Restore recent context after a bot restart before selecting the prompt
+    # window. The current message is already present in RAM and is de-duped by
+    # the loader if its background persistence finished first.
+    await mem.load_channel_history(channel_id)
+
     flags = classify_complexity(content)
     in_guild = message.guild is not None
 
     # ── System prompt assembly ───────────────────────────────────────────────
-    system = _BASE_SYSTEM
+    system = _BASE_SYSTEM + f"\n\nCurrent UTC date: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
 
     # Discord context (always injected in guild, gives the AI awareness of server state)
     if in_guild:
