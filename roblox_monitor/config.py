@@ -12,20 +12,22 @@ MONITORED_GROUPS = {
 # 307 tracked members require seven 50-user presence calls. A 70-second
 # cadence keeps every rolling minute below Roblox's ten-request limit while
 # keeping the dashboard within roughly one minute of live data.
-PRESENCE_SCAN_INTERVAL = 70  # seconds
+# WARNING: Setting this below ~70s may cause Roblox API rate limits (HTTP 429).
+PRESENCE_SCAN_INTERVAL = 20  # seconds
 PRESENCE_BATCH_SIZE = 50
 PRESENCE_BATCH_DELAY_SECONDS = 2
 # Only retry when Roblox explicitly provides a short Retry-After. A shared
 # hosting IP can return a bare 429 for minutes; looping on that just blocks
 # the bot without producing a valid scan.
 PRESENCE_MAX_RETRIES = 1
-PRESENCE_STARTUP_DELAY_SECONDS = 60
+PRESENCE_STARTUP_DELAY_SECONDS = 5
 PRESENCE_429_COOLDOWN_SECONDS = 90
 GROUP_SYNC_INTERVAL = 300  # 5 minutes
 
 # Optional dedicated proxy for hosts whose shared egress IP is persistently
 # throttled by Roblox. Example: http://user:pass@host:port
-ROBLOX_PROXY_URL = os.getenv("ROBLOX_PROXY_URL", "").strip()
+_proxy_env = os.getenv("ROBLOX_PROXY_URL", "").strip()
+ROBLOX_PROXY_LIST = [p.strip() for p in _proxy_env.split(",") if p.strip()]
 
 # The only game the bot cares about
 TARGET_UNIVERSE_ID = 9662757817

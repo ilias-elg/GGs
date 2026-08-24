@@ -31,10 +31,12 @@ class MonitorTasks:
         
         self.sync_groups.start()
         self.scan_presence.start()
+        self.dashboard_updater.start()
         
     def cog_unload(self):
         self.sync_groups.cancel()
         self.scan_presence.cancel()
+        self.dashboard_updater.cancel()
         asyncio.create_task(self.client.close())
 
     @tasks.loop(seconds=GROUP_SYNC_INTERVAL)
@@ -171,9 +173,6 @@ class MonitorTasks:
                 await db.execute('INSERT OR REPLACE INTO bot_status (key, value) VALUES (?, ?)', ('last_scan_time', str(now)))
                 await db.commit()
                 
-                # 6. Live Dashboard Update
-                await self.update_live_dashboard(db)
-                
                 duration = time.time() - start_time
                 logger.info(f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players} (Unassigned server: {null_game_id_count})")
                 
@@ -203,6 +202,18 @@ class MonitorTasks:
                     logger.error(f"Error updating live dashboard: {e}")
         except Exception as e:
             logger.error(f"Failed to check live dashboard: {e}")
+
+    @tasks.loop(seconds=20)
+    async def dashboard_updater(self):
+        try:
+            async with aiosqlite.connect(DB_PATH, timeout=15.0) as db:
+                await self.update_live_dashboard(db)
+        except Exception as e:
+            logger.error(f"Error in dashboard_updater: {e}")
+
+    @dashboard_updater.before_loop
+    async def before_dashboard_updater(self):
+        await self.bot.wait_until_ready()
 
     @scan_presence.before_loop
     async def before_scan(self):

@@ -345,7 +345,7 @@ async def build_dashboard_embed() -> discord.Embed:
 
         # ── FOOTER ───────────────────────────────────────────────────────────
         embed.set_footer(
-            text="🔄 Scan every 20s  ·  🔁 Group sync every 15m  ·  Last updated"
+            text="🔄 Dash updates every 20s  ·  📡 Scan every 20s  ·  🔁 Group sync every 5m  ·  Last updated"
         )
 
     return embed

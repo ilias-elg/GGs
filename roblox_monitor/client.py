@@ -9,8 +9,9 @@ from .config import (
     PRESENCE_BATCH_SIZE,
     PRESENCE_429_COOLDOWN_SECONDS,
     PRESENCE_MAX_RETRIES,
-    ROBLOX_PROXY_URL,
+    ROBLOX_PROXY_LIST,
 )
+import random
 
 logger = logging.getLogger('discord')
 
@@ -21,7 +22,9 @@ class RobloxClient:
 
     @property
     def _request_options(self) -> dict:
-        return {"proxy": ROBLOX_PROXY_URL} if ROBLOX_PROXY_URL else {}
+        if ROBLOX_PROXY_LIST:
+            return {"proxy": random.choice(ROBLOX_PROXY_LIST)}
+        return {}
 
     async def get_session(self):
         if self.session is None or self.session.closed:
