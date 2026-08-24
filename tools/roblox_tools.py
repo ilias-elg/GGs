@@ -196,6 +196,36 @@ ROBLOX_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_roblox_api",
+            "description": (
+                "Make a raw HTTP request to any Roblox API endpoint (e.g., users.roblox.com, groups.roblox.com). "
+                "Use this for dynamic lookups that aren't covered by other tools, such as searching for a user by name, "
+                "checking catalog items, fetching game badges, etc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The full Roblox API URL.",
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP Method: 'GET' or 'POST' (default 'GET').",
+                        "enum": ["GET", "POST"]
+                    },
+                    "json_payload": {
+                        "type": "object",
+                        "description": "Optional JSON payload for POST requests.",
+                    }
+                },
+                "required": ["url"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -268,6 +298,8 @@ async def execute_roblox_tool(name: str, args: dict, ctx: dict | None = None) ->
             return await _find_player(args.get("username", ""))
         elif name == "analyze_roblox_user":
             return await _analyze_roblox_user(args.get("username", ""))
+        elif name == "query_roblox_api":
+            return await _query_roblox_api(args.get("url", ""), args.get("method", "GET"), args.get("json_payload", None))
         else:
             return {"error": f"Unknown Roblox tool: {name}"}
     except Exception as e:
@@ -686,3 +718,31 @@ async def _analyze_roblox_user(username: str) -> dict:
             result["groups"] = [g["group"]["name"] for g in groups["data"]]
             
         return result
+
+
+# ---------------------------------------------------------------------------
+# Generic Roblox API Query Tool
+# ---------------------------------------------------------------------------
+
+async def _query_roblox_api(url: str, method: str = "GET", json_payload: dict = None) -> dict:
+    import aiohttp
+    
+    if not url.startswith("https://") or "roblox.com" not in url:
+        return {"error": "Invalid URL. Must be a valid roblox.com HTTPS endpoint."}
+        
+    try:
+        async with aiohttp.ClientSession() as session:
+            if method.upper() == "POST":
+                async with session.post(url, json=json_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if "application/json" in resp.headers.get("Content-Type", ""):
+                        return {"status": resp.status, "data": await resp.json()}
+                    else:
+                        return {"status": resp.status, "text": await resp.text()}
+            else:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if "application/json" in resp.headers.get("Content-Type", ""):
+                        return {"status": resp.status, "data": await resp.json()}
+                    else:
+                        return {"status": resp.status, "text": await resp.text()}
+    except Exception as e:
+        return {"error": str(e)}
