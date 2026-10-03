@@ -47,6 +47,7 @@ _CONFIRMATION_TOOLS = frozenset({
     "remove_timeout", "assign_role", "remove_role", "change_nickname",
     "send_message", "delete_message", "bulk_delete_messages", "pin_message",
     "run_local_task", "write_workspace_file", "delete_workspace_file",
+    "reset_merit_data", "clear_standing_orders",
 })
 _YES_WORDS = frozenset({"yes", "y", "yeah", "yep", "sure", "confirm", "confirmed", "do it", "go ahead", "proceed"})
 _NO_WORDS = frozenset({"no", "n", "nope", "cancel", "stop", "don't", "do not"})
@@ -300,7 +301,13 @@ class ConversationManager:
             message.attachments and
             any(a.content_type and a.content_type.startswith("image/") for a in message.attachments)
         )
-        tool_schemas = get_tools_for_context(content, in_guild=in_guild, has_image=has_image)
+        tool_schemas = get_tools_for_context(
+            content,
+            in_guild=in_guild,
+            has_image=has_image,
+            member=message.author,
+            recent_text=ctx_data["recent_user_text"],
+        )
         logger.debug(f"Selected {len(tool_schemas)} tools for: {content[:60]!r}")
 
         # Tool execution context passed to discord_tools

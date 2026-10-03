@@ -19,6 +19,13 @@ from .general_tools import (
     execute_general_tool,
 )
 from .filesystem_tools import FILE_SCHEMAS, FILE_TOOL_NAMES, execute_filesystem_tool
+from .fire_nation_tools import (
+    MERIT_SCHEMAS,
+    ORDER_SCHEMAS,
+    FIRE_NATION_TOOL_NAMES,
+    get_fire_nation_schemas,
+    execute_fire_nation_tool,
+)
 import config
 
 # ---------------------------------------------------------------------------
@@ -102,6 +109,8 @@ def get_tools_for_context(
     content: str,
     in_guild: bool = True,
     has_image: bool = False,
+    member=None,
+    recent_text: str = "",
 ) -> list[dict]:
     """
     Return only the tool schemas relevant to this specific message.
@@ -158,6 +167,14 @@ def get_tools_for_context(
     if in_guild and (bool(words & info_words) or wants_discord):
         schemas.extend(_INFO_SCHEMAS)
 
+    # Merits and standing orders — matched against a short window of recent
+    # user turns, so a reply to a clarifying question ("what reason should I
+    # log?" → "log GG") doesn't drop the tool mid-flow.
+    if in_guild:
+        schemas.extend(get_fire_nation_schemas(
+            f"{recent_text} {content}", member, offer_all=config.FULL_TOOLSET
+        ))
+
     # Voice — join/leave vc
     if wants_voice and not (in_guild and config.FULL_DISCORD_TOOLS):
         schemas.extend(_VOICE_SCHEMAS)
@@ -181,7 +198,7 @@ def get_all_schemas(in_guild: bool = True) -> list[dict]:
         schemas.append(LOCAL_TASK_SCHEMA)
         schemas.extend(FILE_SCHEMAS)
     if in_guild:
-        schemas += list(DISCORD_SCHEMAS)
+        schemas += list(DISCORD_SCHEMAS) + list(MERIT_SCHEMAS) + list(ORDER_SCHEMAS)
     return schemas
 
 
@@ -203,6 +220,8 @@ async def execute_tool(name: str, args: dict, ctx: dict) -> dict:
         return await execute_filesystem_tool(name, args, ctx)
     elif name in DISCORD_TOOL_NAMES:
         return await execute_discord_tool(name, args, ctx)
+    elif name in FIRE_NATION_TOOL_NAMES:
+        return await execute_fire_nation_tool(name, args, ctx)
     elif name in WEB_TOOL_NAMES:
         result = await execute_web_tool(name, args)
         # Cache webpage content in channel memory for follow-up questions

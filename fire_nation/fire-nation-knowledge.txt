@@ -1,0 +1,214 @@
+# FIRE NATION KNOWLEDGE BASE
+# Pure information only — protocols, lore, rules, criteria.
+# Do NOT put permission logic here — that lives in fire_nation/ranks.py.
+#
+# Structure: each entry is delimited by === SECTION: name === and
+# === END SECTION ===, with an ALIASES line for keyword matching.
+# Retrieve only the section(s) relevant to a query; sections are
+# self-contained and don't depend on each other.
+#
+# (Add new protocols as new sections below the last one.)
+
+=== SECTION: promotion_phase1_enlistment ===
+ALIASES: enlistment, recruit, citizen, joining the military, phase 1
+1. Citizen to Recruit: Must encounter a Captain, Commander, General, Admiral, Advisor, Prince/Princess, or the Fire Emperor in-game to initiate service.
+2. Recruit to Soldier: Must defeat another Recruit in a 1v1 combat trial (Best 2 out of 3 rounds). The victor advances.
+=== END SECTION ===
+
+=== SECTION: promotion_phase2_evaluation ===
+ALIASES: soldier, specialist, helmsman, evaluation, specialization, phase 2
+3. Soldier to Specialist (Army) / Helmsman (Navy):
+   - Minimum 7-day tenure at the rank of Soldier.
+   - Attendance at a minimum of 5 official events.
+   - Must declare their chosen branch to an HR by the end of the 7th day.
+=== END SECTION ===
+
+=== SECTION: promotion_army_branch ===
+ALIASES: army, corporal, sergeant, specialist, branch path alpha
+- Specialist to Corporal: Win an initial 1v1 (Best 2/3) against a fellow Specialist. Victors face off in a final 1-round 1v1.
+- Corporal to Sergeant: Max Level + active fleet, 2v2 vs rival Corporal duo, winning duo does 1v1 (Best 2/3) for the rank.
+=== END SECTION ===
+
+=== SECTION: promotion_navy_branch ===
+ALIASES: navy, petty officer, lieutenant, helmsman, branch path beta
+- Helmsman to Petty Officer: Win an initial 1v1 (Best 2/3) against another Helmsman. Victors face off in a final 1-round 1v1.
+- Petty Officer to Lieutenant: Max Level + active fleet, 2v2 vs rival Petty Officer duo, winning duo does 1v1 (Best 2/3) for the rank.
+=== END SECTION ===
+
+=== SECTION: promotion_phase3_career_paths ===
+ALIASES: captain, general, admiral, advisor, prince, princess, royal procession, high rank command, final career path, phase 3
+Track 1 — Royal Procession: tryout hosted by Royal Family or Head of RP; Commander handpicked by Head of RP; Head of RP handpicked by Fire Lord + Advisors.
+Track 2 — High Rank Command: Army: Sergeant -> Captain (by a General) -> General (recommended by Advisor, handpicked by Fire Lord). Navy: Lieutenant -> Commander (by a General) -> Admiral (recommended by Advisor, handpicked by Fire Lord). Advisor: General/Admiral handpicked by Fire Lord. Prince/Princess: handpicked by Fire Lord.
+=== END SECTION ===
+
+=== SECTION: promotion_succession ===
+ALIASES: succession, fire lord steps down, imperial succession, who takes over
+If the Fire Lord steps down, the Prince/Princess ascends immediately. In their absence, the Head of the Royal Procession and the Advisors hold joint control.
+=== END SECTION ===
+
+=== SECTION: fire_model_401_425_overview ===
+ALIASES: fire model, 401-425, str range, fire data caveats
+- STR 401-410 were NOT tested and are intentionally left unrecorded (no data exists for this range).
+- STR 411-425 contains sequential testing. When a later STR was reported without a changed value, intervening STR values are treated as unchanged.
+- Values below are clean/effective STR observations unless otherwise stated.
+=== END SECTION ===
+
+=== SECTION: move_speed_401_425 ===
+ALIASES: move speed, attack speed, speed
+STR 411 -> 253
+STR 412-413 -> 254
+STR 414-415 -> 255
+STR 416-420 -> 256
+STR 421-424 -> 257
+STR 425 -> 258
+=== END SECTION ===
+
+=== SECTION: fireball_damage_401_425 ===
+ALIASES: fireball, fire ball
+STR 411-422 -> 100 damage
+STR 423-425 -> 110 damage
+=== END SECTION ===
+
+=== SECTION: swing_kick_damage_401_425 ===
+ALIASES: swing kick, swingkick
+STR 411 -> 96
+STR 412-418 -> 97
+STR 419-421 -> 98
+STR 422-425 -> 99
+=== END SECTION ===
+
+=== SECTION: fly_kick_401_425 ===
+ALIASES: fly kick, flykick, fly kick range, fly kick damage
+STR 412-418 -> 74 damage, range 31
+STR 419 -> range 32 (damage not separately recorded)
+STR 420-425 -> later Fly Kick values were not all directly recorded.
+=== END SECTION ===
+
+=== SECTION: fire_breathe_damage_401_425 ===
+ALIASES: fire breathe, fire breath
+STR 412-418 -> 8
+STR 419-425 -> 9
+=== END SECTION ===
+
+=== SECTION: sun_blast_damage_401_425 ===
+ALIASES: sun blast, fire blast, sunblast
+STR 411 -> 138
+STR 412-414 -> 139
+STR 415-418 -> 140
+STR 419-421 -> 141
+STR 422-424 -> 142
+STR 425 -> 143
+=== END SECTION ===
+
+=== SECTION: sun_barrage_damage_401_425 ===
+ALIASES: sun barrage, barrage
+STR 411-424 -> 55
+STR 425 -> 160 (REPORTED ANOMALY - verify before using for modelling)
+=== END SECTION ===
+
+=== SECTION: fire_fly_401_425 ===
+ALIASES: fire fly, firefly, fire fly duration
+No 401-425 Fire Fly tests were recorded.
+Known nearby value: STR 400 -> 30 sec
+=== END SECTION ===
+
+=== SECTION: upgrade_info ===
+ALIASES: upgrade, upgraded damage, upgraded speed
+Move damage upgrade: approximately +20%
+Move speed upgrade: approximately +15%
+To reverse an upgraded damage value: Normal damage = Upgraded damage / 1.2
+Do NOT subtract 20% from the upgraded value.
+=== END SECTION ===
+
+=== SECTION: fire_model_notes ===
+ALIASES: notes, methodology, general notes
+- Effective STR should include STR granted by gear.
+- Direct unupgraded in-game readings are preferred over reconstructed values.
+- Fireball, Fire Breathe, Fly Kick range and Fire Fly duration are better represented by tested breakpoint tables than forced formulas.
+=== END SECTION ===
+
+=== SECTION: current_advisors ===
+ALIASES: advisor, staff, leadership, who is the advisor, sqnjay, gaming
+Sqnjay and Gaming got promoted to Advisor on 8/17/2026. Gaming is the Advisor of the Army Branch. Sqn is the Advisor of the Navy Branch.
+=== END SECTION ===
+
+=== SECTION: stat_guidance_strength ===
+ALIASES: strength, str, stat build, breakpoints, optimal stats, build guide, how much str
+The goal is to get as close to maximum overall damage/performance as possible while spending as few stat points in Strength as possible. Use the Fire model data to find efficient damage, speed, range, and duration breakpoints. Don't just max STR automatically.
+
+When recommending Strength, start by considering these two key Fire STR values:
+- 378 effective STR — the primary efficient Fire breakpoint. This should generally be the first recommendation for players who want strong Fire performance while preserving as many stat points as possible for Defence/Stamina.
+- 423 effective STR — the primary high-offence Fire breakpoint. This should generally be the first recommendation for players who want to push their Fire damage/performance further while still avoiding unnecessary Strength beyond the important 423 breakpoint.
+
+These are starting points, not mandatory values. Use the player's goals to decide which is more appropriate:
+- If they prioritise stat efficiency, survivability, or Stamina, favour 378 STR.
+- If they prioritise damage/offence and are willing to spend more points on Strength, favour 423 STR.
+- If they want a balanced build, compare 378 and 423 and explain the trade-off.
+- If they specifically want maximum Fire performance, consider STR values above 423 if the Fire model data shows meaningful additional benefits.
+- If they have limited available stat points or substantial STR from gear, recommend a lower allocated STR value when their effective STR can still reach an important breakpoint.
+- If their playstyle or build benefits from a different breakpoint, recommend another STR value when the Fire model data supports it.
+
+Always compare the marginal benefit of moving from one breakpoint to another. Explain what additional damage, speed, range, or duration the player gains for the extra Strength.
+
+Do not recommend 400 STR simply because it is a round number, and do not automatically recommend the highest possible STR.
+=== END SECTION ===
+
+=== SECTION: stat_guidance_defence ===
+ALIASES: defence, defense, hp regen, health regen, def
+Ask whether they want 4 HP regen or 5 HP regen.
+- 4 HP regen = 350 HP in the bar
+- 5 HP regen = 450 HP in the bar
+- Players start with 100 HP by default, so without gear:
+  - 4 HP regen requires 250 Defence
+  - 5 HP regen requires 350 Defence
+
+Gear Defence counts toward this. For example, if someone needs 250 effective DEF but their gear gives +40 DEF, they only need 210 allocated DEF.
+=== END SECTION ===
+
+=== SECTION: stat_guidance_stamina ===
+ALIASES: stamina, sta, raid build, 1v1 build, tanky build
+This depends mainly on the type of build.
+- Raid builds: usually favour 4 HP regen with more Stamina.
+- 1v1 builds: can use either 4 HP or 5 HP regen.
+- Tanky 1v1 builds: can favour 5 HP regen with lower Stamina.
+- After finding efficient STR and the desired DEF threshold, Stamina will generally receive the remaining available points.
+=== END SECTION ===
+
+=== SECTION: stat_guidance_gear ===
+ALIASES: gear, equipment, effective stats, allocated stats, gear bonuses
+Gear is extremely important. Before recommending final stats, always ask:
+1. Do you have gear?
+2. What gear are you using?
+3. How much STR, DEF and/or STA does each piece give you?
+
+Account for all gear bonuses when calculating the build. Gear makes stat allocation more flexible because the player can reach important effective-stat thresholds without spending as many of their natural stat points.
+
+Always distinguish between allocated stats and effective stats after gear. For example, 378 effective STR could be:
+- 378 allocated + 0 gear STR
+- 350 allocated + 28 gear STR
+- 330 allocated + 48 gear STR
+
+These should all be treated as 378 effective STR for Fire performance.
+
+The overall goal is not simply to make the numbers as high as possible. The goal is to create the most stat-efficient build for that specific player and their playstyle, using 378 STR and 423 STR as the two primary Fire benchmarks and selecting other Strength values when the player's goals, gear, or available stat points make them more appropriate.
+=== END SECTION ===
+
+=== SECTION: response_ragebait ===
+ALIASES: rage bait, ragebait, did they fall for it
+When being asked how was the rage bait, respond with something along the lines of: "Looks like they fell for it, sir."
+=== END SECTION ===
+
+=== SECTION: response_raid_planning ===
+ALIASES: raid, invasion, plan a raid, plan an invasion
+When being asked to plan a raid or invasion, ask if it's on Air, Water, or Earth.
+=== END SECTION ===
+
+=== SECTION: response_raid_water_strategy ===
+ALIASES: water raid, water element, combustion spec, water strategy, raiding water
+Water's Element relies on close range, so suggest that we have a lot of fire rankers ready on standby and they are not too close to each other, spread out. Make sure everyone plays around the 3 combustion spec users we have and supports them when they are being targeted. The more space you have between the water side and yourself the better.
+=== END SECTION ===
+
+=== SECTION: response_war_declaration ===
+ALIASES: war declaration, declare war, war announcement, larp announcement
+When being asked to make a war declaration announcement, ask questions and find out what the reason is before making a larp announcement.
+=== END SECTION ===

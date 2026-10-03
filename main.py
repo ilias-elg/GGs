@@ -1,7 +1,8 @@
 """
 Fire Nation Bot — main entry point.
 
-Bob responds to:
+Bob responds — only to the Owner, the Fire Lord and the standing-access
+list (see fire_nation/ranks.py) — to:
   - @mentions in any channel
   - Messages containing "bob" (case-insensitive)
   - DMs
@@ -53,10 +54,10 @@ def get_manager():
     if _manager is None:
         from ai import create_provider
         from conversation.manager import ConversationManager
-        from voice.manager import VoiceManager
+        from voice.manager import get_voice_manager
 
         ai = create_provider()
-        _voice_manager = VoiceManager(bot)
+        _voice_manager = get_voice_manager(bot)
         _manager = ConversationManager(ai, bot, voice_manager=_voice_manager)
         logger.info(f"ConversationManager initialized (provider={config.AI_PROVIDER}, model={config.get_model()})")
     return _manager
@@ -75,8 +76,29 @@ async def setup_hook():
     except Exception as e:
         logger.error(f"Failed to load roblox_monitor: {e}")
 
-    # Sync slash commands (none currently, but ready for future use)
-    await bot.tree.sync()
+    # Merits, ranks, knowledge base, standing orders, voice lines, diagnostics
+    try:
+        await bot.load_extension("fire_nation")
+        logger.info("Fire Nation features loaded")
+    except Exception as e:
+        logger.error(f"Failed to load fire_nation: {e}", exc_info=True)
+
+    # Sync slash commands. A failure here must not stop the bot from starting.
+    try:
+        if config.TEST_GUILD_ID:
+            # Guild-scoped commands propagate almost instantly — use this while
+            # testing so you don't have to wait up to an hour.
+            guild = discord.Object(id=config.TEST_GUILD_ID)
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+        else:
+            synced = await bot.tree.sync()
+        logger.info(f"Slash commands synced: {[c.name for c in synced]}")
+    except discord.HTTPException as e:
+        logger.error(
+            f"Failed to sync slash commands: {e}. Check that the bot was invited with the "
+            "'applications.commands' scope and, if DISCORD_TEST_GUILD_ID is set, that the bot is in that guild."
+        )
 
 
 bot.setup_hook = setup_hook
@@ -172,12 +194,30 @@ async def on_message(message: discord.Message):
         message.author.id,
     )
 
-    if not _is_addressed_to_bob(message):
+    # "bob go to sleep" / "bob wake up" — while asleep, chat is ignored entirely.
+    from fire_nation import chat_hooks
+    sleep_state = await chat_hooks.handle_sleep_wake(message, bot)
+    if sleep_state == "handled":
+        return
+
+    # Bob only converses with the Owner, the Fire Lord and anyone on the
+    # standing-access list. Everyone else still has the slash commands.
+    from fire_nation.ranks import has_access
+    if (
+        sleep_state == "asleep"
+        or not has_access(message.author)
+        or not _is_addressed_to_bob(message)
+    ):
         await bot.process_commands(message)
         return
 
     from conversation import memory as mem
     mem.activate_conversation(message.channel.id, message.author.id)
+
+    # "join vc" / "leave vc" / "say that out loud" / "voice status"
+    from voice.manager import get_voice_manager
+    if await chat_hooks.handle_voice_phrase(message, content, get_voice_manager(bot)):
+        return
 
     # A natural way to end a conversation without needing a command.
     if content.lower().strip() in {"stop", "stop talking", "end conversation", "goodbye", "bye bob"}:

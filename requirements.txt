@@ -3,8 +3,9 @@ openai>=1.50.0
 python-dotenv==1.0.1
 aiohttp
 aiosqlite
+asyncpg>=0.29
 httpx>=0.27.0
-audioop-lts
+audioop-lts; python_version >= "3.13"
 beautifulsoup4
 PyNaCl
 duckduckgo-search>=6.0.0
