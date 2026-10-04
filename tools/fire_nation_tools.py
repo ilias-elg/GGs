@@ -23,7 +23,8 @@ MERIT_SCHEMAS: list[dict] = [
                 "Awards merits to one or more members. Use type 'bonus' for one or more named members, each "
                 "receiving the same 0.1-50 amount (Advisor+ only); use 'exam'/'event' (HR+) or 'raid' "
                 "(Advisor+ only) with a required host — the person who receives the merit for running it — "
-                "an optional cohost who also receives it, plus any participant usernames."
+                "plus any participant usernames. Exams and events (not raids) can also have a cohost, who gets an "
+                "extra 0.5 on top of their participant merit — list them in usernames too if they took part."
             ),
             "parameters": {
                 "type": "object",
@@ -47,7 +48,7 @@ MERIT_SCHEMAS: list[dict] = [
                     },
                     "cohost": {
                         "type": "string",
-                        "description": "Optional for 'exam'/'event'/'raid'. Only set it when the user names a co-host.",
+                        "description": "Optional, 'exam'/'event' only. Only set it when the user names a co-host.",
                     },
                     "amount": {
                         "type": "number",
@@ -312,21 +313,37 @@ async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: st
     recipients, not_found, ambiguous = _resolve_all(guild, usernames)
     if ambiguous:
         raise merit.MeritError(ambiguous)
-    for lead in (host, cohost):
-        if lead and all(m.id != lead.id for m in recipients):
-            recipients.append(lead)
-    for m in recipients:
+    if cohost and (cohost.id == host.id or merit_type not in merit.COHOST_MERIT_TYPES):
+        cohost = None
+    if all(m.id != host.id for m in recipients):
+        recipients.append(host)
+    for m in [*recipients, *([cohost] if cohost else [])]:
         merit.assert_not_protected_owner(actor_rank, m.id)
 
     amount = merit.fixed_merit_amount(merit_type)
     label = merit_type.capitalize()
-    await merit.record_award(guild.id, recipients, amount, f"{label} (conversational)", actor)
+    awards = [(m, amount) for m in recipients]
+    # The co-host bonus is extra: it stacks with the participant merit they
+    # get from being listed among the participants.
+    if cohost:
+        awards.append((cohost, merit.COHOST_BONUS_AMOUNT))
+    await merit.record_awards(guild.id, awards, f"{label} (conversational)", actor)
     await merit.audit_award(bot, recipients, amount, label, actor)
-    leads = f"Host: {host}" + (f", Co-host: {cohost}" if cohost else "")
+    if cohost:
+        await merit.audit_award(bot, [cohost], merit.COHOST_BONUS_AMOUNT, f"{label} (co-host bonus)", actor)
+    cohost_note = ""
+    if cohost:
+        listed = any(m.id == cohost.id for m in recipients)
+        cohost_note = (
+            f" Co-host {cohost} received a **+{merit.fmt_amount(merit.COHOST_BONUS_AMOUNT)}** bonus"
+            + ("." if listed else " only — they weren't listed as a participant.")
+        )
+    elif cohost_query and merit_type not in merit.COHOST_MERIT_TYPES:
+        cohost_note = " Raids have no co-host bonus, so none was given."
     return (
         f"Recorded **+{merit.fmt_amount(amount)}** {merit_type} merit{merit.plural(amount)} for "
-        f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'} ({leads})"
-        f"{_not_found_note(not_found)} — logged for owners."
+        f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'} (Host: {host})"
+        f"{_not_found_note(not_found)} — logged for owners.{cohost_note}"
     )
 
 

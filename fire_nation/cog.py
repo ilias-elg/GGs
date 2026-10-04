@@ -260,7 +260,7 @@ class FireNationCog(commands.Cog):
         host: discord.Member,
         cohost: discord.Member | None,
     ) -> None:
-        """exam / event / raid — every @mention in the announcement, plus the host and co-host."""
+        """exam / event / raid — every @mention in the announcement plus the host; co-hosts (exam/event) get +0.5."""
         await interaction.response.defer(ephemeral=True)
         guild, actor = interaction.guild, interaction.user
         try:
@@ -290,21 +290,38 @@ class FireNationCog(commands.Cog):
             mentioned_count = len(recipients)
             for m in recipients:
                 merit.assert_not_protected_owner(actor_rank, m.id)
-            # Host and co-host always receive merit, whether or not they were tagged in the announcement
-            for lead in (host, cohost):
-                if lead and all(m.id != lead.id for m in recipients):
-                    recipients.append(lead)
+            if cohost and cohost.id == host.id:
+                cohost = None
+            # The host always receives the merit, tagged in the announcement or not.
+            if all(m.id != host.id for m in recipients):
+                recipients.append(host)
 
             amount = merit.fixed_merit_amount(merit_type)
             label = merit_type.capitalize()
-            await merit.record_award(guild.id, recipients, amount, proof, actor)
+            awards = [(m, amount) for m in recipients]
+            # The co-host bonus is extra: it stacks with the participant merit
+            # they get from being pinged in the announcement.
+            if cohost:
+                awards.append((cohost, merit.COHOST_BONUS_AMOUNT))
+            await merit.record_awards(guild.id, awards, proof, actor)
             await merit.audit_award(self.bot, recipients, amount, label, actor, proof)
+            if cohost:
+                await merit.audit_award(
+                    self.bot, [cohost], merit.COHOST_BONUS_AMOUNT, f"{label} (co-host bonus)", actor, proof
+                )
 
-            leads = f"Host: {host}" + (f", Co-host: {cohost}" if cohost else "")
+            cohost_note = ""
+            if cohost:
+                pinged = any(m.id == cohost.id for m in recipients)
+                cohost_note = (
+                    f"\n• **Co-host:** {cohost} — **+{merit.fmt_amount(merit.COHOST_BONUS_AMOUNT)}** bonus"
+                    + ("" if pinged else " only (not pinged in the announcement, so no participant merit)")
+                )
             await interaction.edit_original_response(content=(
                 f"Recorded **+{merit.fmt_amount(amount)}** {label} merit{merit.plural(amount)} for "
-                f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'} ({leads})"
-                f"{_skipped_note(len(mention_ids) - mentioned_count)} — logged for owners.\n• **Proof:** <{proof}>"
+                f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'} (Host: {host})"
+                f"{_skipped_note(len(mention_ids) - mentioned_count)} — logged for owners."
+                f"{cohost_note}\n• **Proof:** <{proof}>"
             ))
         except merit.MeritError as e:
             logger.warning(f"Merit award rejected for {actor.id}: {e}")
@@ -315,7 +332,7 @@ class FireNationCog(commands.Cog):
         announcement="Paste the full exam conclusion — every @mention is extracted automatically.",
         proof="Discord message link as proof",
         host="The host who ran this exam — receives the merit.",
-        cohost="Optional co-host — also receives the merit.",
+        cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",
     )
     async def addmerit_exam(
         self, interaction: discord.Interaction, announcement: str, proof: str,
@@ -328,7 +345,7 @@ class FireNationCog(commands.Cog):
         announcement="Paste the full event conclusion — every @mention is extracted automatically.",
         proof="Discord message link as proof",
         host="The host who ran this event — receives the merit.",
-        cohost="Optional co-host — also receives the merit.",
+        cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",
     )
     async def addmerit_event(
         self, interaction: discord.Interaction, announcement: str, proof: str,
@@ -341,13 +358,11 @@ class FireNationCog(commands.Cog):
         announcement="Paste the full raid conclusion — every @mention is extracted automatically.",
         proof="Discord message link as proof",
         host="The host who led this raid — receives the merit.",
-        cohost="Optional co-host — also receives the merit.",
     )
     async def addmerit_raid(
-        self, interaction: discord.Interaction, announcement: str, proof: str,
-        host: discord.Member, cohost: discord.Member | None = None,
+        self, interaction: discord.Interaction, announcement: str, proof: str, host: discord.Member,
     ) -> None:
-        await self._award_activity(interaction, "raid", announcement, proof, host, cohost)
+        await self._award_activity(interaction, "raid", announcement, proof, host, None)
 
     @addmerit.command(
         name="bonus", description="Award 0.1–50 bonus merits to one or more members. Advisor and above only."

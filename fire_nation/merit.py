@@ -40,6 +40,12 @@ def fixed_merit_amount(merit_type: str) -> float:
     return 3 if merit_type == "raid" else 1
 
 
+# Exams and events only: a co-host earns this on top of the participant merit
+# they get for being pinged in the announcement.
+COHOST_BONUS_AMOUNT = 0.5
+COHOST_MERIT_TYPES = ("exam", "event")
+
+
 def assert_can_award(actor_rank: str, merit_type: str) -> None:
     if merit_type not in MERIT_TYPES:
         raise MeritError(f"Unknown merit type '{merit_type}'.")
@@ -156,8 +162,19 @@ async def record_award(
     proof_url: str,
     actor: discord.abc.User,
 ) -> None:
+    await record_awards(guild_id, [(m, amount) for m in recipients], proof_url, actor)
+
+
+async def record_awards(
+    guild_id: int,
+    awards: list[tuple[discord.Member, float]],
+    proof_url: str,
+    actor: discord.abc.User,
+) -> None:
+    """Records (member, amount) pairs that belong to one action — e.g. participants plus a co-host."""
     logger.info(
-        f"Recording merit award: +{amount} x{len(recipients)} in guild {guild_id} by {actor.id}"
+        f"Recording merit award: {len(awards)} entries totalling "
+        f"+{fmt_amount(sum(a for _, a in awards))} in guild {guild_id} by {actor.id}"
     )
     pool = await get_pool()
     async with pool.acquire() as db:
@@ -167,7 +184,7 @@ async def record_award(
                 _INSERT,
                 [
                     (str(guild_id), str(m.id), str(m), _numeric(amount), proof_url, str(actor.id), str(actor))
-                    for m in recipients
+                    for m, amount in awards
                 ],
             )
 

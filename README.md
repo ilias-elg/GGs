@@ -43,7 +43,7 @@ Slash commands:
 | Command | Who | What |
 | --- | --- | --- |
 | `/merits`, `/leaderboard` | everyone | A member's total, or the paged leaderboard |
-| `/addmerit exam` / `event` | HR+ | +1 to every @mention in the pasted announcement, plus host and co-host |
+| `/addmerit exam` / `event` | HR+ | +1 to every @mention in the pasted announcement and the host; a co-host gets an extra 0.5 |
 | `/addmerit raid` / `bonus`, `/removemerit` | Advisor+ | +3 per raid participant; 0.1–50 bonus or removal |
 | `/merithistory`, `/addknowledge`, `/reloadknowledge` | HR+ | Ledger history; knowledge base entries |
 | `/createhr`, `/createadvisor` | Royalty+ | Create the rank roles (no Discord permissions) |
