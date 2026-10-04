@@ -9,10 +9,13 @@ MONITORED_GROUPS = {
 }
 
 # Scanning and Syncing Intervals
-# 307 tracked members require seven 50-user presence calls. A 70-second
-# cadence keeps every rolling minute below Roblox's ten-request limit while
-# keeping the dashboard within roughly one minute of live data.
-# WARNING: Setting this below ~70s may cause Roblox API rate limits (HTTP 429).
+# Roblox allows roughly ten presence requests per minute per IP, and each
+# scan needs one 50-user request per 50 tracked members. A 20-second cadence
+# therefore depends on ROBLOX_PROXY_URL listing enough proxies to share the
+# load: about (members / 50) * 3 requests a minute, spread evenly across
+# them. ~600 members is 36 requests a minute — fine on ten proxies, far too
+# many for one IP.
+# WARNING: with no proxies, anything below ~70s will hit rate limits (HTTP 429).
 PRESENCE_SCAN_INTERVAL = 20  # seconds
 PRESENCE_BATCH_SIZE = 50
 PRESENCE_BATCH_DELAY_SECONDS = 2

@@ -11,13 +11,13 @@ from .config import (
     PRESENCE_MAX_RETRIES,
     ROBLOX_PROXY_LIST,
 )
-import random
 
 logger = logging.getLogger('discord')
 
 # A proxy that refuses requests (out of credit, bad login, unreachable) is
 # left alone for this long before being tried again.
 PROXY_COOLDOWN_SECONDS = 15 * 60
+MAX_PROXY_SWITCHES_PER_BATCH = 3
 
 
 def _redact(text) -> str:
@@ -30,16 +30,27 @@ class RobloxClient:
         self.session = None
         self._presence_blocked_until = 0.0
         self._bad_proxies: dict[str, float] = {}
+        self._next_proxy = 0
+
+    def _working_proxies(self) -> list[str]:
+        now = time.monotonic()
+        return [p for p in ROBLOX_PROXY_LIST if self._bad_proxies.get(p, 0) <= now]
 
     def _pick_proxy(self) -> str | None:
-        """A random proxy that isn't cooling down, or None to connect directly."""
-        now = time.monotonic()
-        working = [p for p in ROBLOX_PROXY_LIST if self._bad_proxies.get(p, 0) <= now]
-        return random.choice(working) if working else None
+        """
+        The next proxy that isn't cooling down, or None to connect directly.
+        Round-robin rather than random: Roblox rate-limits per IP, so the
+        requests have to be spread evenly for every proxy to stay under it.
+        """
+        working = self._working_proxies()
+        if not working:
+            return None
+        self._next_proxy += 1
+        return working[self._next_proxy % len(working)]
 
     async def _request(self, method: str, url: str, **kwargs):
         """
-        One Roblox request. Returns (status, headers, json-or-None).
+        One Roblox request. Returns (status, headers, json-or-None, proxy used).
 
         If the chosen proxy itself refuses the request, it is benched and the
         request is retried through another proxy — and directly, once none are
@@ -51,7 +62,7 @@ class RobloxClient:
             try:
                 async with session.request(method, url, proxy=proxy, **kwargs) as resp:
                     data = await resp.json() if resp.status == 200 else None
-                    return resp.status, resp.headers, data
+                    return resp.status, resp.headers, data, proxy
             except (aiohttp.ClientHttpProxyError, aiohttp.ClientProxyConnectionError) as e:
                 if proxy is None:
                     raise
@@ -60,8 +71,7 @@ class RobloxClient:
                     f"{e.status} {e.message}" if isinstance(e, aiohttp.ClientHttpProxyError)
                     else "could not connect"
                 )
-                now = time.monotonic()
-                remaining = sum(1 for p in ROBLOX_PROXY_LIST if self._bad_proxies.get(p, 0) <= now)
+                remaining = len(self._working_proxies())
                 logger.warning(
                     "Roblox proxy %s refused the request (%s); skipping it for %s minutes. %s",
                     _redact(proxy),
@@ -71,6 +81,20 @@ class RobloxClient:
                     else "No working proxies left — connecting directly.",
                 )
         raise RuntimeError("every Roblox proxy refused the request")
+
+    def _bench_rate_limited_proxy(self, proxy: str | None) -> bool:
+        """
+        Roblox rate-limits per IP, so a 429 says the proxy just used is busy,
+        not that the others are. Benches it and returns True when another
+        proxy is free to retry through; False when there is nothing to switch
+        to (no proxies, or this was the last one not cooling down).
+        """
+        if proxy is None:
+            return False
+        if not [p for p in self._working_proxies() if p != proxy]:
+            return False
+        self._bad_proxies[proxy] = time.monotonic() + PRESENCE_429_COOLDOWN_SECONDS
+        return True
 
     async def get_session(self):
         if self.session is None or self.session.closed:
@@ -91,7 +115,7 @@ class RobloxClient:
                 params["cursor"] = cursor
 
             try:
-                status, _, data = await self._request("GET", url, params=params)
+                status, _, data, _ = await self._request("GET", url, params=params)
                 if status == 429:
                     await asyncio.sleep(5)
                     continue
@@ -128,8 +152,83 @@ class RobloxClient:
                 return min(max(float(match.group(0)), 1.0), 60.0)
         return min(5.0 * (2 ** attempt), 60.0)
 
+    async def _fetch_presence_batch(self, url: str, batch: list, batch_number: int, total: int):
+        """One presence batch. Returns its presences, or None when it could not be fetched."""
+        payload = {"userIds": batch}
+        for attempt in range(PRESENCE_MAX_RETRIES + 1):
+            try:
+                status, headers, data, proxy = await self._request("POST", url, json=payload)
+                # Rate-limited on this proxy's IP: try the batch through a few
+                # others before treating it as a real throttle.
+                switches = 0
+                while (
+                    status == 429
+                    and switches < MAX_PROXY_SWITCHES_PER_BATCH
+                    and self._bench_rate_limited_proxy(proxy)
+                ):
+                    switches += 1
+                    logger.info(
+                        "Presence batch %s/%s was rate-limited; retrying through another proxy (%s/%s).",
+                        batch_number,
+                        total,
+                        switches,
+                        MAX_PROXY_SWITCHES_PER_BATCH,
+                    )
+                    status, headers, data, proxy = await self._request("POST", url, json=payload)
+            except Exception as e:
+                logger.error(f"Error fetching presence batch {batch_number}: {_redact(e)}")
+                return None
+
+            if status == 200:
+                return data.get("userPresences", [])
+            if status != 429:
+                logger.error(
+                    "Failed to fetch presence batch %s/%s: HTTP %s", batch_number, total, status
+                )
+                return None
+
+            retry_after = headers.get("Retry-After")
+            if attempt >= PRESENCE_MAX_RETRIES:
+                self._presence_blocked_until = time.monotonic() + PRESENCE_429_COOLDOWN_SECONDS
+                logger.warning(
+                    "Roblox blocked presence batch %s/%s; skipping this scan and "
+                    "cooling down for %ss. If this repeats, configure ROBLOX_PROXY_URL "
+                    "or use a host with a dedicated outbound IP.",
+                    batch_number,
+                    total,
+                    PRESENCE_429_COOLDOWN_SECONDS,
+                )
+                return None
+            if not retry_after:
+                self._presence_blocked_until = time.monotonic() + PRESENCE_429_COOLDOWN_SECONDS
+                logger.warning(
+                    "Roblox returned a bare 429 for presence batch %s/%s; skipping "
+                    "this scan instead of waiting. Cooldown: %ss.",
+                    batch_number,
+                    total,
+                    PRESENCE_429_COOLDOWN_SECONDS,
+                )
+                return None
+            delay = self._retry_after_seconds(retry_after, attempt)
+            logger.warning(
+                "Roblox throttled presence batch %s/%s; retrying in %.1fs (%s/%s).",
+                batch_number,
+                total,
+                delay,
+                attempt + 1,
+                PRESENCE_MAX_RETRIES,
+            )
+            await asyncio.sleep(delay)
+        return None
+
     async def fetch_presence(self, user_ids):
-        """Fetch presence sequentially, retrying only the batch Roblox throttles."""
+        """
+        Fetch presence for every user, or None if any batch could not be fetched.
+
+        Batches go out in waves of one per working proxy, so each wave hits
+        Roblox from different IPs at once; with no proxies that is one batch
+        at a time, paced by PRESENCE_BATCH_DELAY_SECONDS.
+        """
         url = "https://presence.roblox.com/v1/presence/users"
         remaining_cooldown = self._presence_blocked_until - time.monotonic()
         if remaining_cooldown > 0:
@@ -144,68 +243,20 @@ class RobloxClient:
         ]
         results = []
 
-        for batch_number, batch in enumerate(batches, start=1):
-            payload = {"userIds": batch}
-            completed = False
-            for attempt in range(PRESENCE_MAX_RETRIES + 1):
-                try:
-                    status, headers, data = await self._request("POST", url, json=payload)
-                    if status == 200:
-                        results.extend(data.get("userPresences", []))
-                        completed = True
-                        break
-                    if status == 429:
-                        retry_after = headers.get("Retry-After")
-                    else:
-                        logger.error(
-                            "Failed to fetch presence batch %s/%s: HTTP %s",
-                            batch_number,
-                            len(batches),
-                            status,
-                        )
-                        return None
-                    if attempt >= PRESENCE_MAX_RETRIES:
-                        self._presence_blocked_until = (
-                            time.monotonic() + PRESENCE_429_COOLDOWN_SECONDS
-                        )
-                        logger.warning(
-                            "Roblox blocked presence batch %s/%s; skipping this scan and "
-                            "cooling down for %ss. If this repeats, configure ROBLOX_PROXY_URL "
-                            "or use a host with a dedicated outbound IP.",
-                            batch_number,
-                            len(batches),
-                            PRESENCE_429_COOLDOWN_SECONDS,
-                        )
-                        return None
-                    if not retry_after:
-                        self._presence_blocked_until = (
-                            time.monotonic() + PRESENCE_429_COOLDOWN_SECONDS
-                        )
-                        logger.warning(
-                            "Roblox returned a bare 429 for presence batch %s/%s; skipping "
-                            "this scan instead of waiting. Cooldown: %ss.",
-                            batch_number,
-                            len(batches),
-                            PRESENCE_429_COOLDOWN_SECONDS,
-                        )
-                        return None
-                    delay = self._retry_after_seconds(retry_after, attempt)
-                    logger.warning(
-                        "Roblox throttled presence batch %s/%s; retrying in %.1fs (%s/%s).",
-                        batch_number,
-                        len(batches),
-                        delay,
-                        attempt + 1,
-                        PRESENCE_MAX_RETRIES,
-                    )
-                    await asyncio.sleep(delay)
-                except Exception as e:
-                    logger.error(f"Error fetching presence batch {batch_number}: {_redact(e)}")
-                    return None
-
-            if not completed:
+        start = 0
+        while start < len(batches):
+            width = max(1, len(self._working_proxies()))
+            wave = batches[start:start + width]
+            outcomes = await asyncio.gather(*(
+                self._fetch_presence_batch(url, batch, start + offset + 1, len(batches))
+                for offset, batch in enumerate(wave)
+            ))
+            if any(outcome is None for outcome in outcomes):
                 return None
-            if batch_number < len(batches):
+            for outcome in outcomes:
+                results.extend(outcome)
+            start += len(wave)
+            if start < len(batches):
                 await asyncio.sleep(PRESENCE_BATCH_DELAY_SECONDS)
 
         return results
@@ -222,7 +273,7 @@ class RobloxClient:
 
         names = {}
         try:
-            status, _, data = await self._request("GET", url, params=params)
+            status, _, data, _ = await self._request("GET", url, params=params)
             if status == 200:
                 for item in data.get('data', []):
                     names[item['id']] = item['name']
