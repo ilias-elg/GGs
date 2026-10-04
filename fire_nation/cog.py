@@ -304,11 +304,7 @@ class FireNationCog(commands.Cog):
             if cohost:
                 awards.append((cohost, merit.COHOST_BONUS_AMOUNT))
             await merit.record_awards(guild.id, awards, proof, actor)
-            await merit.audit_award(self.bot, recipients, amount, label, actor, proof)
-            if cohost:
-                await merit.audit_award(
-                    self.bot, [cohost], merit.COHOST_BONUS_AMOUNT, f"{label} (co-host bonus)", actor, proof
-                )
+            await merit.audit_award(self.bot, awards, label, actor, proof, host=host, cohost=cohost)
 
             cohost_note = ""
             if cohost:
@@ -398,7 +394,7 @@ class FireNationCog(commands.Cog):
                 raise merit.MeritError("None of the mentioned members were found in this server.")
 
             await merit.record_award(guild.id, recipients, amount, f"Bonus award authorized by {actor}", actor)
-            await merit.audit_award(self.bot, recipients, amount, "Bonus", actor)
+            await merit.audit_award(self.bot, [(m, amount) for m in recipients], "Bonus", actor)
             await interaction.edit_original_response(content=(
                 f"Recorded **+{merit.fmt_amount(amount)}** Bonus merit{merit.plural(amount)} for "
                 f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'}"

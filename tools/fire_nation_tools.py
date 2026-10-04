@@ -289,7 +289,7 @@ async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: st
             merit.assert_not_protected_owner(actor_rank, m.id)
 
         await merit.record_award(guild.id, recipients, amount, "Bonus (conversational)", actor)
-        await merit.audit_award(bot, recipients, amount, "Bonus", actor)
+        await merit.audit_award(bot, [(m, amount) for m in recipients], "Bonus", actor)
         return (
             f"Recorded **+{merit.fmt_amount(amount)}** Bonus merit{merit.plural(amount)} for "
             f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'}"
@@ -328,9 +328,7 @@ async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: st
     if cohost:
         awards.append((cohost, merit.COHOST_BONUS_AMOUNT))
     await merit.record_awards(guild.id, awards, f"{label} (conversational)", actor)
-    await merit.audit_award(bot, recipients, amount, label, actor)
-    if cohost:
-        await merit.audit_award(bot, [cohost], merit.COHOST_BONUS_AMOUNT, f"{label} (co-host bonus)", actor)
+    await merit.audit_award(bot, awards, label, actor, host=host, cohost=cohost)
     cohost_note = ""
     if cohost:
         listed = any(m.id == cohost.id for m in recipients)

@@ -312,52 +312,88 @@ async def _fetch_log_channel(bot: discord.Client):
     return channel
 
 
-def _audit_embed(title: str, description: str) -> discord.Embed:
+def _audit_embed(title: str, description: str, color: int) -> discord.Embed:
     embed = discord.Embed(
         title=title,
         description=description,
-        color=config.FIRE_RED,
+        color=color,
         timestamp=datetime.now(timezone.utc),
     )
     embed.set_footer(text="FIRE NATION • OWNER AUDIT CHANNEL")
     return embed
 
 
+def _who(user: discord.abc.User) -> str:
+    """Mention plus username: the mention is clickable, the username survives if the mention can't resolve."""
+    return f"<@{user.id}> {discord.utils.escape_markdown(str(user))}"
+
+
+def _chunk_lines(lines: list[str], limit: int = 1024) -> list[str]:
+    """Packs lines into as few embed-field values as fit Discord's per-field limit."""
+    chunks, current = [], ""
+    for line in lines:
+        if current and len(current) + 1 + len(line) > limit:
+            chunks.append(current)
+            current = line
+        else:
+            current = f"{current}\n{line}" if current else line
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 async def audit_award(
     bot: discord.Client,
-    recipients: list[discord.Member],
-    amount: float,
+    awards: list[tuple[discord.Member, float]],
     merit_type: str,
     actor: discord.abc.User,
     proof_url: str | None = None,
+    host: discord.Member | None = None,
+    cohost: discord.Member | None = None,
 ) -> None:
+    """One embed per action: who got how much in total, with the host and co-host marked."""
     channel = await _fetch_log_channel(bot)
     if not channel:
         return
 
-    amount_text = fmt_amount(amount)
-    member_lines = "\n".join(f"• {m} ({m.id}) — **+{amount_text}**" for m in recipients)
+    totals: dict[int, float] = {}
+    members: dict[int, discord.Member] = {}
+    for member, amount in awards:
+        totals[member.id] = totals.get(member.id, 0) + amount
+        members[member.id] = member
+    host_id, cohost_id = getattr(host, "id", None), getattr(cohost, "id", None)
+
+    def line(member_id: int) -> str:
+        role = " · **host**" if member_id == host_id else " · **co-host**" if member_id == cohost_id else ""
+        return f"`+{fmt_amount(totals[member_id]):<3}` {_who(members[member_id])}{role}"
+
+    # Host first, then co-host, then everyone else by name.
+    order = sorted(
+        totals,
+        key=lambda i: (i != host_id, i != cohost_id, str(members[i]).lower()),
+    )
+    grand_total = sum(totals.values())
+    count = len(totals)
     embed = _audit_embed(
-        "FIRE NATION // MERIT AWARD AUDIT",
-        "A merit transaction has been authorized and recorded.",
+        f"{merit_type} merits recorded",
+        f"**{count}** member{'' if count == 1 else 's'} · "
+        f"**{fmt_amount(grand_total)}** merit{plural(grand_total)} in total",
+        config.FIRE_ORANGE,
     )
-    embed.add_field(name="RECIPIENTS", value=member_lines[:1024], inline=False)
-    embed.add_field(
-        name="MERIT VALUE",
-        value=f"**+{amount_text}** merit{plural(amount)} per recipient",
-        inline=True,
-    )
-    embed.add_field(name="TYPE", value=merit_type, inline=True)
-    embed.add_field(name="AUTHORIZED BY", value=str(actor), inline=False)
+    for index, chunk in enumerate(_chunk_lines([line(i) for i in order])[:20]):
+        embed.add_field(name="Recipients" if index == 0 else "​", value=chunk, inline=False)
+    embed.add_field(name="Authorized by", value=_who(actor), inline=True)
     if proof_url:
-        embed.add_field(name="PROOF", value=proof_url, inline=False)
+        embed.add_field(name="Proof", value=f"[Open the message]({proof_url})", inline=True)
 
     try:
         await channel.send(embed=embed)
         # Ping @everyone when a Bonus of more than 3 is awarded — flags it for owner review
-        if merit_type == "Bonus" and amount > 3:
+        largest = max(totals.values())
+        if merit_type == "Bonus" and largest > 3:
             await channel.send(
-                f"@everyone — **{actor}** has awarded a **+{amount_text} Bonus**. Owner review requested.",
+                f"@everyone — **{discord.utils.escape_markdown(str(actor))}** has awarded a "
+                f"**+{fmt_amount(largest)} Bonus**. Owner review requested.",
                 allowed_mentions=discord.AllowedMentions(everyone=True),
             )
     except discord.HTTPException as e:
@@ -376,13 +412,12 @@ async def audit_removal(
         return
 
     embed = _audit_embed(
-        "FIRE NATION // MERIT REMOVAL AUDIT",
-        "A merit deduction has been authorized and recorded.",
+        "Merits removed",
+        f"`-{fmt_amount(amount):<3}` {_who(target)}",
+        config.FIRE_RED,
     )
-    embed.add_field(name="MEMBER", value=f"{target} ({target.id})", inline=False)
-    embed.add_field(name="AMOUNT REMOVED", value=f"**-{fmt_amount(amount)}**", inline=True)
-    embed.add_field(name="REASON", value=reason[:1024], inline=False)
-    embed.add_field(name="AUTHORIZED BY", value=str(actor), inline=False)
+    embed.add_field(name="Reason", value=reason[:1024], inline=False)
+    embed.add_field(name="Authorized by", value=_who(actor), inline=True)
     try:
         await channel.send(embed=embed)
     except discord.HTTPException as e:
