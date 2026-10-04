@@ -334,6 +334,11 @@ class FireNationCog(commands.Cog):
         host="The host who ran this exam — receives the merit.",
         cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",
     )
+    # Option names are deliberately not plain words like "host" or "proof":
+    # Discord's command box treats "<option name>:" anywhere in pasted text as
+    # the start of that option, so an announcement containing "co-host: @x"
+    # used to get split across the fields.
+    @app_commands.rename(host="hosted_by", cohost="cohosted_by", proof="proof_link")
     async def addmerit_exam(
         self, interaction: discord.Interaction, announcement: str, proof: str,
         host: discord.Member, cohost: discord.Member | None = None,
@@ -347,6 +352,7 @@ class FireNationCog(commands.Cog):
         host="The host who ran this event — receives the merit.",
         cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",
     )
+    @app_commands.rename(host="hosted_by", cohost="cohosted_by", proof="proof_link")
     async def addmerit_event(
         self, interaction: discord.Interaction, announcement: str, proof: str,
         host: discord.Member, cohost: discord.Member | None = None,
@@ -359,6 +365,7 @@ class FireNationCog(commands.Cog):
         proof="Discord message link as proof",
         host="The host who led this raid — receives the merit.",
     )
+    @app_commands.rename(host="hosted_by", proof="proof_link")
     async def addmerit_raid(
         self, interaction: discord.Interaction, announcement: str, proof: str, host: discord.Member,
     ) -> None:
