@@ -1,9 +1,9 @@
 """
-Presence — rotating status, optional avatar/banner artwork, and sleep mode.
+Presence — optional avatar/banner artwork, and sleep mode.
 
 "bob go to sleep" / "bob good night" takes Bob fully offline: presence goes
-invisible, the avatar swaps to the offline image, status rotation pauses, and
-every chat message is ignored until "bob wake up".
+invisible, the avatar swaps to the offline image, and every chat message is
+ignored until "bob wake up".
 """
 
 import asyncio
@@ -21,17 +21,6 @@ logger = logging.getLogger("discord")
 SLEEP_PATTERN = re.compile(r"^bob[,]?\s+(?:go to sleep|good\s*night)[.!]?$", re.IGNORECASE)
 WAKE_UP_PATTERN = re.compile(r"^bob[,]?\s+wake up[.!]?$", re.IGNORECASE)
 
-STATUSES = [
-    "Monitoring Fire Nation protocols",
-    "Watching the TSB servers",
-    "Analyzing threat intelligence",
-    "Surveillance systems active",
-    "Fire Nation command online",
-    "Awaiting orders",
-    "All systems nominal",
-    "Securing Fire Nation perimeter",
-]
-STATUS_ROTATION_SECONDS = 5 * 60
 AVATAR_ROTATION_SECONDS = 4 * 60 * 60
 
 # ─── Optional artwork ─────────────────────────────────────────────────────────
@@ -58,7 +47,7 @@ BANNER = _read_asset("banner.gif", "banner.png")
 # ─── State ────────────────────────────────────────────────────────────────────
 
 _asleep = False
-_status_index = 0
+_started = False
 _tasks: list[asyncio.Task] = []
 
 
@@ -72,26 +61,6 @@ async def _edit_profile(bot: discord.Client, **fields) -> None:
     except (discord.HTTPException, TypeError, ValueError) as e:
         # Rate-limited, or an animated image the bot account isn't eligible for.
         logger.warning(f"Could not update bot profile ({', '.join(fields)}): {e}")
-
-
-async def _rotate_status(bot: discord.Client) -> None:
-    global _status_index
-    if _asleep:
-        return
-    await bot.change_presence(
-        status=discord.Status.online,
-        activity=discord.Game(STATUSES[_status_index % len(STATUSES)]),
-    )
-    _status_index += 1
-
-
-async def _status_loop(bot: discord.Client) -> None:
-    while True:
-        try:
-            await _rotate_status(bot)
-        except Exception as e:
-            logger.warning(f"Status rotation failed: {e}")
-        await asyncio.sleep(STATUS_ROTATION_SECONDS)
 
 
 async def _avatar_loop(bot: discord.Client) -> None:
@@ -109,10 +78,11 @@ async def _avatar_loop(bot: discord.Client) -> None:
 
 
 async def start(bot: discord.Client) -> None:
-    """Starts the rotation loops and applies the online avatar/banner. Safe to call on every on_ready."""
-    if _tasks:
+    """Starts avatar rotation and applies the online avatar/banner. Safe to call on every on_ready."""
+    global _started
+    if _started:
         return
-    _tasks.append(asyncio.create_task(_status_loop(bot)))
+    _started = True
     if config.AVATAR_URLS:
         _tasks.append(asyncio.create_task(_avatar_loop(bot)))
     if ONLINE_AVATAR:
@@ -140,7 +110,7 @@ async def wake_up(bot: discord.Client) -> None:
     _asleep = False
     if ONLINE_AVATAR:
         await _edit_profile(bot, avatar=ONLINE_AVATAR)
-    await _rotate_status(bot)
+    await bot.change_presence(status=discord.Status.online)
 
 
 async def on_shutdown(bot: discord.Client) -> None:
