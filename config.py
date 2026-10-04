@@ -11,7 +11,7 @@ load_dotenv()
 DISCORD_TOKEN: str = os.getenv("DISCORD_TOKEN", "")
 
 # ─── AI Provider ──────────────────────────────────────────────────────────────
-# AI_PROVIDER: groq | openai | anthropic
+# AI_PROVIDER: groq | openai | anthropic | gemini
 AI_PROVIDER: str = os.getenv("AI_PROVIDER", "groq").lower()
 # AI_MODEL: leave empty to use the provider default
 AI_MODEL: str = os.getenv("AI_MODEL", "")
@@ -109,8 +109,9 @@ DATA_DIR: str = _first_env("BOT_DATA_DIR", "JARVIS_DATA_DIR") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data"
 )
 
-# Spoken voice lines use Gemini text-to-speech. Without a key Bob can still
-# join voice, he just can't talk.
+# Google AI Studio key. Spoken voice lines use Gemini text-to-speech (without
+# a key Bob can still join voice, he just can't talk), and AI_PROVIDER=gemini
+# uses the same key for chat.
 GOOGLE_API_KEY: str = _first_env("GOOGLE_API_KEY")
 TTS_MODEL: str = _first_env("TTS_MODEL", "JARVIS_TTS_MODEL")
 TTS_VOICE: str = _first_env("TTS_VOICE", "JARVIS_TTS_VOICE") or "Algenib"
@@ -137,11 +138,15 @@ _PROVIDER_DEFAULTS: dict[str, str] = {
     "groq": "groq/compound",
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-20241022",
+    "gemini": "gemini-3.8-flash",
 }
 
 
 def get_model() -> str:
     """Return the configured model, falling back to the provider's recommended default."""
+    if AI_PROVIDER == "gemini" and not AI_MODEL:
+        # Jarvis's variable name, so its settings carry over unchanged.
+        return _first_env("GEMINI_MODEL") or _PROVIDER_DEFAULTS["gemini"]
     return AI_MODEL or _PROVIDER_DEFAULTS.get(AI_PROVIDER, "groq/compound")
 
 
@@ -154,6 +159,7 @@ _BACKGROUND_DEFAULTS: dict[str, str] = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-haiku-20240307",
 }
+# Gemini has no cheaper background default: it reuses the chat model.
 
 
 def get_background_model() -> str:
@@ -172,11 +178,13 @@ def validate() -> list[str]:
         errors.append("GROQ_API_KEY is missing (required when AI_PROVIDER=groq)")
     elif AI_PROVIDER == "openai" and not OPENAI_API_KEY:
         errors.append("OPENAI_API_KEY is missing (required when AI_PROVIDER=openai)")
+    elif AI_PROVIDER == "gemini" and not GOOGLE_API_KEY:
+        errors.append("GOOGLE_API_KEY is missing (required when AI_PROVIDER=gemini)")
     elif AI_PROVIDER == "anthropic" and not ANTHROPIC_API_KEY:
         errors.append("ANTHROPIC_API_KEY is missing (required when AI_PROVIDER=anthropic)")
     elif AI_PROVIDER not in _PROVIDER_DEFAULTS:
         errors.append(
-            f"Unknown AI_PROVIDER '{AI_PROVIDER}'. Valid options: groq, openai, anthropic"
+            f"Unknown AI_PROVIDER '{AI_PROVIDER}'. Valid options: groq, openai, anthropic, gemini"
         )
 
     return errors

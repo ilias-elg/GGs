@@ -12,13 +12,16 @@ def create_provider() -> AIProvider:
     elif provider == "openai":
         from .openai_provider import OpenAIProvider
         return OpenAIProvider()
+    elif provider == "gemini":
+        from .gemini_provider import GeminiProvider
+        return GeminiProvider()
     elif provider == "anthropic":
         from .anthropic_provider import AnthropicProvider
         return AnthropicProvider()
     else:
         raise ValueError(
             f"Unknown AI_PROVIDER: {provider!r}. "
-            "Set AI_PROVIDER to one of: groq, openai, anthropic"
+            "Set AI_PROVIDER to one of: groq, openai, anthropic, gemini"
         )
 
 

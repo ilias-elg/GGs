@@ -415,7 +415,7 @@ class ConversationManager:
                 try:
                     if getattr(e, "status_code", None) == 429:
                         await message.reply(
-                            "Groq is rate-limiting requests right now. "
+                            "The AI provider is rate-limiting requests right now. "
                             "I already retried with backoff; please try again in a few seconds."
                         )
                     else:
