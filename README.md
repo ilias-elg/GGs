@@ -69,6 +69,7 @@ DISCORD_TEST_GUILD_ID=               # register slash commands to one server ins
 GOOGLE_API_KEY=                      # Gemini text-to-speech; without it Bob joins voice but can't speak
 AI_PROVIDER=gemini                   # optional: chat with Gemini (what Jarvis used) on that same key
 GEMINI_MODEL=                        # default: gemini-3.8-flash
+GEMINI_FALLBACK_MODELS=              # comma-separated; used in order when a model's daily quota runs out
 TTS_VOICE=Algenib                    # audition others with /diagnostics tts:True voice:<name>
 TTS_MODEL=                           # default: the first flash TTS model the key can see
 TTS_DELIVERY=                        # style direction placed before each spoken line

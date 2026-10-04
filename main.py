@@ -149,6 +149,25 @@ def _clean_content(message: discord.Message) -> str:
     return content.strip()
 
 
+_DISMISSAL = re.compile(
+    r"^((ok(ay)?|please|bob)[, ]+)*(stop|quit)\b"
+    r"|\b(shut up|be quiet|go away|leave me alone|end (the )?conversation|never ?mind)\b"
+    r"|\bthank(s| you)\b|\bthat'?(s|ll be) all\b|\bthat'?s enough\b|\bgood ?bye\b|\bbye\b"
+    r"|\bdismiss(ed)?\b|\byou'?re (free|dismissed)\b|\ball good\b",
+    re.IGNORECASE,
+)
+
+
+def _is_dismissal(content: str) -> bool:
+    """
+    True for a short message that only ends the conversation ("thanks",
+    "stop responding to me", "that'll be all"). Longer messages are left to
+    the AI, so "thanks — now check the leaderboard" still gets answered.
+    """
+    words = content.split()
+    return 0 < len(words) <= 6 and bool(_DISMISSAL.search(content))
+
+
 # ── Events ────────────────────────────────────────────────────────────────────
 
 @bot.event
@@ -220,7 +239,7 @@ async def on_message(message: discord.Message):
         return
 
     # A natural way to end a conversation without needing a command.
-    if content.lower().strip() in {"stop", "stop talking", "end conversation", "goodbye", "bye bob"}:
+    if _is_dismissal(content):
         mem.end_conversation(message.channel.id)
         await message.reply("Got it — I’ll stay quiet until you call me again.")
         return

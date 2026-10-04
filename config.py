@@ -99,6 +99,17 @@ OWNER_LOG_CHANNEL_ID: int = int(_first_env("DISCORD_OWNER_LOG_CHANNEL_ID") or 0)
 # take up to an hour.
 TEST_GUILD_ID: int = int(_first_env("DISCORD_TEST_GUILD_ID") or 0)
 
+# Models to fall back to, in order, when the chat model runs out of its
+# daily free-tier quota (each model has its own).
+GEMINI_FALLBACK_MODELS: list[str] = [
+    m.strip()
+    for m in (
+        _first_env("GEMINI_FALLBACK_MODELS")
+        or "gemini-3.7-flash,gemini-3.6-flash,gemini-flash-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+    ).split(",")
+    if m.strip()
+]
+
 # Postgres connection string for the merit ledger (Neon, Supabase, Railway…).
 # Pointing this at Jarvis's database carries its merit data over as-is.
 DATABASE_URL: str = _first_env("DATABASE_URL")
@@ -159,7 +170,9 @@ _BACKGROUND_DEFAULTS: dict[str, str] = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-haiku-20240307",
 }
-# Gemini has no cheaper background default: it reuses the chat model.
+# Each Gemini model has its own free-tier quota, so background tasks get a
+# lite model of their own instead of spending the chat model's requests.
+_BACKGROUND_DEFAULTS["gemini"] = "gemini-3.5-flash-lite"
 
 
 def get_background_model() -> str:

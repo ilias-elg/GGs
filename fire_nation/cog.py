@@ -271,7 +271,8 @@ class FireNationCog(commands.Cog):
             if not is_discord_message_link(proof):
                 raise merit.MeritError(
                     "Invalid proof URL. Please provide a valid Discord message link "
-                    "(e.g. https://discord.com/channels/<guild_id>/<channel_id>/<message_id>)."
+                    "(right-click the conclusion message → Copy Message Link). It looks like "
+                    "`https://discord.com/channels/<guild_id>/<channel_id>/<message_id>`."
                 )
             mention_ids = extract_mention_ids(announcement)
             if not mention_ids:

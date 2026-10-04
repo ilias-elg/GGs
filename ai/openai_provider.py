@@ -24,8 +24,19 @@ class OpenAIProvider(AIProvider):
         temperature: float = 0.75,
         max_tokens: int = 1024,
     ) -> AIResponse:
+        return await self._complete(self.model, messages, tools, tool_choice, temperature, max_tokens)
+
+    async def _complete(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[dict] | None,
+        tool_choice: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> AIResponse:
         kwargs: dict = dict(
-            model=self.model,
+            model=model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,

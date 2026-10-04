@@ -405,15 +405,18 @@ class ConversationManager:
 
                 # ── Background tasks (non-blocking) ─────────────────────────
                 snippet = f"{username}: {content}\nBob: {answer}"
-                asyncio.create_task(
-                    _extract_memories(self.ai, user_id, username, guild_id, snippet)
-                )
+                if config.MEMORY_ENABLED:
+                    asyncio.create_task(
+                        _extract_memories(self.ai, user_id, username, guild_id, snippet)
+                    )
                 asyncio.create_task(_maybe_summarise(self.ai, channel_id))
 
             except Exception as e:
                 logger.error(f"ConversationManager error: {e}", exc_info=True)
                 try:
-                    if getattr(e, "status_code", None) == 429:
+                    if getattr(e, "user_message", None):
+                        await message.reply(e.user_message)
+                    elif getattr(e, "status_code", None) == 429:
                         await message.reply(
                             "The AI provider is rate-limiting requests right now. "
                             "I already retried with backoff; please try again in a few seconds."
