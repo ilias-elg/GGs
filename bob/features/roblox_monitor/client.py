@@ -19,6 +19,10 @@ logger = logging.getLogger('discord')
 # A proxy that refuses requests (out of credit, bad login, unreachable) is
 # left alone for this long before being tried again.
 PROXY_COOLDOWN_SECONDS = 15 * 60
+# A proxy Roblox rate-limits is rested this long. Measured: a refused IP stays
+# refused for minutes and needs about four to get its full burst back, so
+# putting it back to work sooner just gets it refused again.
+PROXY_RATE_LIMIT_REST_SECONDS = 5 * 60
 MAX_PROXY_SWITCHES_PER_BATCH = 3
 
 
@@ -95,7 +99,7 @@ class RobloxClient:
             return False
         if not [p for p in self._working_proxies() if p != proxy]:
             return False
-        self._bad_proxies[proxy] = time.monotonic() + PRESENCE_429_COOLDOWN_SECONDS
+        self._bad_proxies[proxy] = time.monotonic() + PROXY_RATE_LIMIT_REST_SECONDS
         return True
 
     def presence_batch_budget(self) -> int:
