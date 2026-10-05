@@ -95,6 +95,9 @@ SECOND_IN_COMMAND_USER_IDS: frozenset[int] = _id_set("DISCORD_SECOND_IN_COMMAND_
 HR_ROLE_IDS: frozenset[int] = _id_set("DISCORD_HR_ROLE_IDS")
 # Every merit action is audit-logged to this channel.
 OWNER_LOG_CHANNEL_ID: int = int(_first_env("DISCORD_OWNER_LOG_CHANNEL_ID") or 0)
+# Fire Nation Military. Once a day, anyone no longer in this server is taken
+# off the leaderboard.
+MERIT_HOME_GUILD_ID: int = int(_first_env("MERIT_HOME_GUILD_ID") or 1528551123240095854)
 # Slash commands registered to one guild appear instantly; global ones can
 # take up to an hour.
 TEST_GUILD_ID: int = int(_first_env("DISCORD_TEST_GUILD_ID") or 0)

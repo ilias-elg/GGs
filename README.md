@@ -50,7 +50,7 @@ Slash commands:
 | `/createroyalty`, `/resetdata`, `/diagnostics` | Owner / Fire Lord | Role, wipe-with-backup, system check |
 | `/voice join` / `leave` / `say` / `status` / `greeting …` | Owner, Fire Lord, access list | Spoken voice lines |
 
-Ranks: Owner and Fire Lord come from the user IDs below; Royalty, Advisor and HR are Discord roles with exactly those names. Merits live in Postgres (`DATABASE_URL`), in the same `merit_awards` table Jarvis uses, so pointing Bob at Jarvis's database carries the existing ledger over. Every award, removal and reset is posted to the owner log channel.
+Ranks: Owner and Fire Lord come from the user IDs below; Royalty, Advisor and HR are Discord roles with exactly those names. Merits live in Postgres (`DATABASE_URL`), in the same `merit_awards` table Jarvis uses, so pointing Bob at Jarvis's database carries the existing ledger over. Every award, removal and reset is posted to the owner log channel. Once a day at midnight UTC, anyone who is no longer in the home server (`MERIT_HOME_GUILD_ID`, Fire Nation Military by default) is taken off the leaderboard; their records move to the `merit_awards_archive` table rather than being deleted.
 
 The same merit actions work in conversation ("bob, give narek 2 bonus merits"), with the same rank checks. The Owner and Fire Lord can also give Bob standing orders ("from now on keep replies short"), which are saved and applied to every later conversation.
 

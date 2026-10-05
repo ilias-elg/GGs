@@ -54,6 +54,13 @@ MERIT_SCHEMAS: list[dict] = [
                         "type": "number",
                         "description": "Required only for 'bonus' — amount between 0.1 and 50.",
                     },
+                    "reason": {
+                        "type": "string",
+                        "description": (
+                            "Required only for 'bonus' — why it is being awarded, in the user's words. "
+                            "Ask for it if they gave none; never invent one."
+                        ),
+                    },
                 },
                 "required": ["merit_type", "usernames"],
             },
@@ -280,6 +287,9 @@ async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: st
             raise merit.MeritError("I need at least one member to award.")
         amount = float(args.get("amount") or 0)
         merit.assert_valid_amount(amount)
+        reason = " ".join(str(args.get("reason") or "").split())[:300]
+        if not reason:
+            raise merit.MeritError("I need a reason for the bonus.")
         recipients, not_found, ambiguous = _resolve_all(guild, usernames)
         if ambiguous:
             raise merit.MeritError(ambiguous)
@@ -288,8 +298,8 @@ async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: st
         for m in recipients:
             merit.assert_not_protected_owner(actor_rank, m.id)
 
-        await merit.record_award(guild.id, recipients, amount, "Bonus (conversational)", actor)
-        await merit.audit_award(bot, [(m, amount) for m in recipients], "Bonus", actor)
+        await merit.record_award(guild.id, recipients, amount, f"Bonus: {reason}", actor)
+        await merit.audit_award(bot, [(m, amount) for m in recipients], "Bonus", actor, reason=reason)
         return (
             f"Recorded **+{merit.fmt_amount(amount)}** Bonus merit{merit.plural(amount)} for "
             f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'}"

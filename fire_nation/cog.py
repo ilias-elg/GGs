@@ -9,11 +9,11 @@ handlers here only parse options, call those, and format the reply.
 import io
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import config
 from voice.manager import get_voice_manager
@@ -214,6 +214,26 @@ class FireNationCog(commands.Cog):
         self.bot = bot
         self.voice_manager = get_voice_manager(bot)
 
+    async def cog_load(self) -> None:
+        self.prune_departed.start()
+
+    async def cog_unload(self) -> None:
+        self.prune_departed.cancel()
+
+    @tasks.loop(time=time(0, 0, tzinfo=timezone.utc))
+    async def prune_departed(self) -> None:
+        """Midnight UTC: take everyone who left the home server off the leaderboard."""
+        try:
+            departed = await merit.prune_departed_members(self.bot)
+            if departed:
+                await merit.audit_prune(self.bot, departed)
+        except Exception as e:
+            logger.error(f"Daily merit cleanup failed: {e}", exc_info=True)
+
+    @prune_departed.before_loop
+    async def _before_prune(self) -> None:
+        await self.bot.wait_until_ready()
+
     async def cog_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:
@@ -373,9 +393,11 @@ class FireNationCog(commands.Cog):
     @app_commands.describe(
         users="@mention one or more members to award, e.g. @Alice @Bob.",
         amount="Merit amount (0.1–50).",
+        reason="Why this bonus is being awarded.",
     )
     async def addmerit_bonus(
-        self, interaction: discord.Interaction, users: str, amount: app_commands.Range[float, 0.1, 50.0]
+        self, interaction: discord.Interaction, users: str, amount: app_commands.Range[float, 0.1, 50.0],
+        reason: app_commands.Range[str, 1, 300],
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         guild, actor = interaction.guild, interaction.user
@@ -393,12 +415,16 @@ class FireNationCog(commands.Cog):
             if not recipients:
                 raise merit.MeritError("None of the mentioned members were found in this server.")
 
-            await merit.record_award(guild.id, recipients, amount, f"Bonus award authorized by {actor}", actor)
-            await merit.audit_award(self.bot, [(m, amount) for m in recipients], "Bonus", actor)
+            reason = " ".join(reason.split())
+            if not reason:
+                raise merit.MeritError("A reason is required for a bonus.")
+            await merit.record_award(guild.id, recipients, amount, f"Bonus: {reason}", actor)
+            await merit.audit_award(self.bot, [(m, amount) for m in recipients], "Bonus", actor, reason=reason)
             await interaction.edit_original_response(content=(
                 f"Recorded **+{merit.fmt_amount(amount)}** Bonus merit{merit.plural(amount)} for "
                 f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'}"
                 f"{_skipped_note(len(mention_ids) - len(recipients))} — logged for owners."
+                f"\n• **Reason:** {discord.utils.escape_markdown(reason)}"
             ))
         except merit.MeritError as e:
             logger.warning(f"Merit award rejected for {actor.id}: {e}")

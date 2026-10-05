@@ -143,6 +143,22 @@ async def ensure_merit_tables() -> None:
         await db.execute(
             "CREATE INDEX IF NOT EXISTS merit_awards_guild_created_idx ON merit_awards (guild_id, created_at)"
         )
+        # Where the rows of members who left the home server go, so the daily
+        # cleanup never destroys anything.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS merit_awards_archive (
+                id integer NOT NULL,
+                guild_id text NOT NULL,
+                member_id text NOT NULL,
+                member_tag text NOT NULL,
+                amount numeric(4, 1) NOT NULL,
+                proof_url text NOT NULL,
+                awarded_by_id text NOT NULL,
+                awarded_by_tag text NOT NULL,
+                created_at timestamp with time zone NOT NULL,
+                archived_at timestamp with time zone DEFAULT now() NOT NULL
+            )
+        """)
 
 
 _INSERT = (
@@ -280,6 +296,52 @@ async def count_entries() -> int:
         return await db.fetchval("SELECT COUNT(*) FROM merit_awards")
 
 
+async def archive_members(member_ids: list[int]) -> None:
+    """Moves every ledger row of these members into merit_awards_archive, taking them off the leaderboard."""
+    ids = [str(i) for i in member_ids]
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        async with db.transaction():
+            await db.execute(
+                "INSERT INTO merit_awards_archive (id, guild_id, member_id, member_tag, amount, proof_url, "
+                "awarded_by_id, awarded_by_tag, created_at) "
+                "SELECT id, guild_id, member_id, member_tag, amount, proof_url, awarded_by_id, awarded_by_tag, "
+                "created_at FROM merit_awards WHERE member_id = ANY($1::text[])",
+                ids,
+            )
+            await db.execute("DELETE FROM merit_awards WHERE member_id = ANY($1::text[])", ids)
+    logger.info(f"Archived the merit records of {len(ids)} departed member(s)")
+
+
+async def prune_departed_members(bot: discord.Client) -> list[dict]:
+    """
+    Takes everyone who is no longer in the home server off the leaderboard and
+    returns their final leaderboard entries. Does nothing when the member list
+    can't be trusted — a wrong "not here" would wipe someone's merits.
+    """
+    guild = bot.get_guild(config.MERIT_HOME_GUILD_ID)
+    if guild is None or guild.unavailable:
+        logger.warning(f"Merit cleanup skipped — home server {config.MERIT_HOME_GUILD_ID} is not available")
+        return []
+    if not guild.chunked:
+        await guild.chunk()
+
+    departed = []
+    for entry in await get_leaderboard():
+        if guild.get_member(entry["member_id"]):
+            continue
+        # The cache says they're gone; ask Discord directly before acting on it.
+        try:
+            await guild.fetch_member(entry["member_id"])
+        except discord.NotFound:
+            departed.append(entry)
+        except discord.HTTPException as e:
+            logger.warning(f"Merit cleanup could not check member {entry['member_id']}: {e}")
+    if departed:
+        await archive_members([e["member_id"] for e in departed])
+    return departed
+
+
 async def reset_all_data(guild_id: int) -> list[dict]:
     """
     Deletes every merit record (all servers) and returns the final leaderboard
@@ -350,6 +412,7 @@ async def audit_award(
     proof_url: str | None = None,
     host: discord.Member | None = None,
     cohost: discord.Member | None = None,
+    reason: str | None = None,
 ) -> None:
     """One embed per action: who got how much in total, with the host and co-host marked."""
     channel = await _fetch_log_channel(bot)
@@ -382,6 +445,8 @@ async def audit_award(
     )
     for index, chunk in enumerate(_chunk_lines([line(i) for i in order])[:20]):
         embed.add_field(name="Recipients" if index == 0 else "​", value=chunk, inline=False)
+    if reason:
+        embed.add_field(name="Reason", value=reason[:1024], inline=False)
     embed.add_field(name="Authorized by", value=_who(actor), inline=True)
     if proof_url:
         embed.add_field(name="Proof", value=f"[Open the message]({proof_url})", inline=True)
@@ -422,6 +487,28 @@ async def audit_removal(
         await channel.send(embed=embed)
     except discord.HTTPException as e:
         logger.error(f"Merit removal audit log send failed: {e}")
+
+
+async def audit_prune(bot: discord.Client, departed: list[dict]) -> None:
+    channel = await _fetch_log_channel(bot)
+    if not channel:
+        return
+    count = len(departed)
+    embed = _audit_embed(
+        "Departed members taken off the leaderboard",
+        f"**{count}** member{'' if count == 1 else 's'} no longer in the server · records archived",
+        config.FIRE_RED,
+    )
+    lines = [
+        f"`{fmt_amount(e['total']):<4}` <@{e['member_id']}> {discord.utils.escape_markdown(e['member_tag'])}"
+        for e in departed
+    ]
+    for index, chunk in enumerate(_chunk_lines(lines)[:20]):
+        embed.add_field(name="Final totals" if index == 0 else "​", value=chunk, inline=False)
+    try:
+        await channel.send(embed=embed)
+    except discord.HTTPException as e:
+        logger.error(f"Merit cleanup audit log send failed: {e}")
 
 
 async def audit_reset(
