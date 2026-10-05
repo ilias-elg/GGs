@@ -21,7 +21,7 @@ ROBLOX_SCHEMAS: list[dict] = [
             "name": "get_group_status",
             "description": (
                 "Get live Roblox presence stats for one of the monitored groups: "
-                "TSB Air, TSB Earth, TSB Water, or TSB Fire. Returns member count, "
+                "TSB Air, TSB Earth or TSB Water. Returns member count, "
                 "how many are online/in-game, top games, and same-server info."
             ),
             "parameters": {
@@ -29,7 +29,7 @@ ROBLOX_SCHEMAS: list[dict] = [
                 "properties": {
                     "group_name": {
                         "type": "string",
-                        "description": "One of: 'TSB Air', 'TSB Earth', 'TSB Water', 'TSB Fire'. "
+                        "description": "One of: 'TSB Air', 'TSB Earth', 'TSB Water'. "
                                        "Aliases like 'Air', 'Earth', 'Water', 'Fire' also work.",
                     }
                 },
@@ -373,7 +373,7 @@ async def _get_group_status(group_name: str) -> dict:
     group_id, full_name = _resolve_group(group_name)
     if group_id is None:
         return {
-            "error": f"Unknown group: '{group_name}'. Valid groups: TSB Air, TSB Earth, TSB Water, TSB Fire."
+            "error": f"Unknown group: '{group_name}'. Valid groups: TSB Air, TSB Earth, TSB Water (TSB Fire is not tracked)."
         }
 
     async with aiosqlite.connect(DB_PATH) as db:

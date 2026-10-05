@@ -5,15 +5,17 @@ MONITORED_GROUPS = {
     485588074: "TSB Air",
     592750791: "TSB Earth",
     1029776236: "TSB Water",
-    44315578: "TSB Fire"
 }
+# TSB Fire (44315578) is deliberately not tracked: presence checks are rate
+# limited, and leaving out our own group gives the other three a quarter more
+# of them. Adding the line back here is all it takes to track it again.
 
 # Groups whose members are checked less often, so the scan's limited capacity
 # goes to the others first. A member of one of these and of a normal group is
 # checked at the normal rate.
 LOW_PRIORITY_GROUP_IDS = frozenset(
-    int(x) for x in os.getenv("ROBLOX_LOW_PRIORITY_GROUP_IDS", "44315578").split(",") if x.strip().isdigit()
-)  # default: TSB Fire
+    int(x) for x in os.getenv("ROBLOX_LOW_PRIORITY_GROUP_IDS", "").split(",") if x.strip().isdigit()
+)  # none by default
 # How many times staler a low-priority member's reading may get than everyone else's.
 LOW_PRIORITY_FACTOR = 3
 

@@ -51,6 +51,13 @@ class MonitorTasks:
             async with aiosqlite.connect(DB_PATH, timeout=15.0) as db:
                 all_users = set()
                 
+                # Members of a group that is no longer monitored would
+                # otherwise keep being scanned forever.
+                placeholders = ",".join("?" * len(MONITORED_GROUPS))
+                await db.execute(
+                    f'DELETE FROM group_members WHERE group_id NOT IN ({placeholders})', tuple(MONITORED_GROUPS)
+                )
+
                 for group_id in MONITORED_GROUPS:
                     # Do not overlap group sync traffic with the presence API.
                     async with self._roblox_api_lock:
