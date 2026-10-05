@@ -9,15 +9,20 @@ MONITORED_GROUPS = {
 }
 
 # Scanning and Syncing Intervals
-# Roblox allows roughly ten presence requests per minute per IP, and each
-# scan needs one 50-user request per 50 tracked members. A 20-second cadence
-# therefore depends on ROBLOX_PROXY_URL listing enough proxies to share the
-# load: about (members / 50) * 3 requests a minute, spread evenly across
-# them. ~600 members is 36 requests a minute — fine on ten proxies, far too
-# many for one IP.
-# WARNING: with no proxies, anything below ~70s will hit rate limits (HTTP 429).
+# Measured against the live API (the x-ratelimit headers advertise 60 a
+# minute, but that is not the limit that bites): an IP gets a burst of about
+# ten presence requests, then is refused for minutes, and what it can keep up
+# indefinitely is PRESENCE_REQUESTS_PER_IP_PER_MINUTE. 50 users per request is
+# the most the endpoint accepts.
+#
+# So each scan may only send as many batches as the working proxies can
+# sustain. When that is fewer than (members / 50), the scan refreshes everyone
+# who was online last time plus the members checked longest ago, and the rest
+# keep their last known state until their turn — online members stay fresh
+# every scan, and someone coming online is picked up within a scan or two.
 PRESENCE_SCAN_INTERVAL = 20  # seconds
 PRESENCE_BATCH_SIZE = 50
+PRESENCE_REQUESTS_PER_IP_PER_MINUTE = float(os.getenv("PRESENCE_REQUESTS_PER_IP_PER_MINUTE", "2.4"))
 PRESENCE_BATCH_DELAY_SECONDS = 2
 # Only retry when Roblox explicitly provides a short Retry-After. A shared
 # hosting IP can return a bare 429 for minutes; looping on that just blocks

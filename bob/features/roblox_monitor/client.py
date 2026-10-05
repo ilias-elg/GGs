@@ -9,6 +9,8 @@ from .config import (
     PRESENCE_BATCH_SIZE,
     PRESENCE_429_COOLDOWN_SECONDS,
     PRESENCE_MAX_RETRIES,
+    PRESENCE_REQUESTS_PER_IP_PER_MINUTE,
+    PRESENCE_SCAN_INTERVAL,
     ROBLOX_PROXY_LIST,
 )
 
@@ -95,6 +97,11 @@ class RobloxClient:
             return False
         self._bad_proxies[proxy] = time.monotonic() + PRESENCE_429_COOLDOWN_SECONDS
         return True
+
+    def presence_batch_budget(self) -> int:
+        """How many presence batches one scan may send without pushing any IP past what it can sustain."""
+        ips = max(1, len(self._working_proxies()))
+        return max(1, int(ips * PRESENCE_REQUESTS_PER_IP_PER_MINUTE * PRESENCE_SCAN_INTERVAL / 60))
 
     async def get_session(self):
         if self.session is None or self.session.closed:
@@ -223,7 +230,9 @@ class RobloxClient:
 
     async def fetch_presence(self, user_ids):
         """
-        Fetch presence for every user, or None if any batch could not be fetched.
+        Fetch presence for these users. Returns what the batches that worked
+        came back with — a failed batch just leaves its users out — or None
+        when nothing could be fetched.
 
         Batches go out in waves of one per working proxy, so each wave hits
         Roblox from different IPs at once; with no proxies that is one batch
@@ -242,6 +251,7 @@ class RobloxClient:
             for index in range(0, len(user_ids), PRESENCE_BATCH_SIZE)
         ]
         results = []
+        fetched_any = False
 
         start = 0
         while start < len(batches):
@@ -251,15 +261,14 @@ class RobloxClient:
                 self._fetch_presence_batch(url, batch, start + offset + 1, len(batches))
                 for offset, batch in enumerate(wave)
             ))
-            if any(outcome is None for outcome in outcomes):
-                return None
+            fetched_any = fetched_any or any(outcome is not None for outcome in outcomes)
             for outcome in outcomes:
-                results.extend(outcome)
+                results.extend(outcome or [])
             start += len(wave)
             if start < len(batches):
                 await asyncio.sleep(PRESENCE_BATCH_DELAY_SECONDS)
 
-        return results
+        return results if fetched_any else None
 
     async def fetch_game_names(self, universe_ids):
         """Fetches names for a list of universe IDs."""

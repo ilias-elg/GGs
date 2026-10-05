@@ -8,7 +8,7 @@ from datetime import datetime
 
 from .config import (
     MONITORED_GROUPS, PRESENCE_SCAN_INTERVAL, GROUP_SYNC_INTERVAL,
-    PRESENCE_STARTUP_DELAY_SECONDS,
+    PRESENCE_BATCH_SIZE, PRESENCE_STARTUP_DELAY_SECONDS,
     TARGET_UNIVERSE_ID,
     SPIKE_WINDOW_SECONDS, ALERT_THRESHOLD_INFO, ALERT_THRESHOLD_WARNING,
     ALERT_THRESHOLD_HIGH, ALERT_THRESHOLD_CRITICAL, ALERT_PERCENT_INFO,
@@ -28,6 +28,10 @@ class MonitorTasks:
         self.tracked_users_count = 0
         self._initial_group_sync_finished = asyncio.Event()
         self._roblox_api_lock = asyncio.Lock()
+        # Last known presence per member, and when it was last checked — a
+        # scan can only refresh as many members as the rate limit allows.
+        self._presence_cache = {}
+        self._presence_checked_at = {}
         
         self.sync_groups.start()
         self.scan_presence.start()
@@ -85,6 +89,23 @@ class MonitorTasks:
     async def before_sync(self):
         await self.bot.wait_until_ready()
 
+    def _users_to_refresh(self, user_ids):
+        """
+        The members this scan checks: everyone who was online last time (or
+        has never been checked), then the ones checked longest ago, up to what
+        the rate limit allows.
+        """
+        limit = self.client.presence_batch_budget() * PRESENCE_BATCH_SIZE
+        if len(user_ids) <= limit:
+            return user_ids
+
+        def priority(user_id):
+            cached = self._presence_cache.get(user_id)
+            online = cached is None or cached.get('userPresenceType', 0) != 0
+            return (not online, self._presence_checked_at.get(user_id, 0))
+
+        return sorted(user_ids, key=priority)[:limit]
+
     @tasks.loop(seconds=PRESENCE_SCAN_INTERVAL)
     async def scan_presence(self):
         start_time = time.time()
@@ -104,14 +125,34 @@ class MonitorTasks:
                     return
                     
                 # 2. Fetch presence
-                # A full presence scan owns Roblox API access until all seven
+                # A presence scan owns Roblox API access until all its
                 # batches finish, preventing a group-sync burst from causing
                 # a mid-scan throttle.
+                to_refresh = self._users_to_refresh(user_ids)
                 async with self._roblox_api_lock:
-                    presences = await self.client.fetch_presence(user_ids)
-                if not presences:
+                    fresh = await self.client.fetch_presence(to_refresh)
+                if not fresh:
                     self.last_scan_status = "FAILED"
                     return
+
+                checked_at = time.time()
+                for p in fresh:
+                    self._presence_cache[p.get('userId')] = p
+                    self._presence_checked_at[p.get('userId')] = checked_at
+                tracked = set(user_ids)
+                for user_id in [u for u in self._presence_cache if u not in tracked]:
+                    del self._presence_cache[user_id]
+                    self._presence_checked_at.pop(user_id, None)
+                # Right after a restart nobody has a known state yet. Recording
+                # now would show the unchecked members as offline, so wait
+                # until every member has been checked once.
+                if len(self._presence_cache) < len(tracked):
+                    logger.info(
+                        f"Presence warm-up: {len(self._presence_cache)}/{len(tracked)} members checked so far."
+                    )
+                    return
+                presences = list(self._presence_cache.values())
+                oldest = int(checked_at - min(self._presence_checked_at.values()))
                     
                 self.last_scan_status = "SUCCESS"
                 self.last_scan_time = int(time.time())
@@ -174,7 +215,11 @@ class MonitorTasks:
                 await db.commit()
                 
                 duration = time.time() - start_time
-                logger.info(f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players} (Unassigned server: {null_game_id_count})")
+                logger.info(
+                    f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players} "
+                    f"(Unassigned server: {null_game_id_count}). Refreshed {len(fresh)}/{len(user_ids)}; "
+                    f"oldest check {oldest}s ago."
+                )
                 
         except Exception as e:
             logger.error(f"Error scanning presence: {e}")
