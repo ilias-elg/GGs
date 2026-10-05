@@ -2,7 +2,7 @@
 Fire Nation features ported from the Jarvis bot: merit ledger, rank roles,
 knowledge base, standing orders, spoken voice lines, presence and diagnostics.
 
-Loaded as a discord.py extension from main.py.
+Loaded as a discord.py extension from bob/app.py.
 """
 
 import logging
@@ -17,7 +17,7 @@ async def setup(bot):
     os.makedirs(config.DATA_DIR, exist_ok=True)
 
     from . import greetings, knowledge, merit, orders, presence, ranks
-    from voice.manager import get_voice_manager
+    from bob.voice.manager import get_voice_manager
 
     # A database problem must not take the other features down with it.
     try:

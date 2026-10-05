@@ -8,6 +8,25 @@ Bob is a conversational Discord agent with:
 - safe deterministic tools for calculations and current time;
 - confirmation-gated Discord mutations and optional local workspace tasks.
 
+## Layout
+
+```
+main.py            entry point the host runs — only starts bob/app.py
+config.py          every setting, read from .env
+requirements.txt
+bob/
+  app.py           the Discord client: startup, and deciding which messages Bob answers
+  ai/              model providers (Gemini, Groq, OpenAI, Anthropic)
+  conversation/    the chat pipeline: prompt building, tool loop, memory
+  tools/           the functions the AI can call
+  voice/           the voice connection and speech queue
+  features/
+    fire_nation/     merits, ranks, knowledge base, standing orders, voice lines, diagnostics
+    roblox_monitor/  Roblox group tracking and the live dashboard
+docs/              reference material (damage calculator spreadsheet)
+data/              runtime state, created on first run — not in git
+```
+
 ## Optional local workspace tasks
 
 Local execution is disabled by default. To enable it, add these values to `.env`:
@@ -54,7 +73,7 @@ Ranks: Owner and Fire Lord come from the user IDs below; Royalty, Advisor and HR
 
 The same merit actions work in conversation ("bob, give narek 2 bonus merits"), with the same rank checks. The Owner and Fire Lord can also give Bob standing orders ("from now on keep replies short"), which are saved and applied to every later conversation.
 
-`fire_nation/fire-nation-knowledge.txt` is the knowledge base; sections whose `ALIASES` match a message are added to that reply's context. Entries added with `/addknowledge` are stored in the data directory.
+`bob/features/fire_nation/fire-nation-knowledge.txt` is the knowledge base; sections whose `ALIASES` match a message are added to that reply's context. Entries added with `/addknowledge` are stored in the data directory.
 
 In voice, Bob greets the Owner, Fire Lord and access-list members when they join, reads announcement-channel posts aloud, and leaves after 15 minutes alone. "bob, join vc", "leave vc", "say that out loud" and "voice status" work from chat. "bob, go to sleep" / "bob, wake up" take him offline and back.
 

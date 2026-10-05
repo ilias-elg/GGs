@@ -7,7 +7,7 @@ import logging
 
 import discord
 
-from conversation import memory as mem
+from bob.conversation import memory as mem
 
 from . import presence
 from . import voice as voice_feature

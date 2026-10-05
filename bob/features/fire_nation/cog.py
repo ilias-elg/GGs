@@ -16,7 +16,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from voice.manager import get_voice_manager
+from bob.voice.manager import get_voice_manager
 
 from . import conclusions, diagnostics, greetings, knowledge, merit, presence, tts
 from . import voice as voice_feature

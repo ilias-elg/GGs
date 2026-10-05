@@ -1,7 +1,7 @@
 """
 Conversational equivalents of the merit slash commands and the standing-order
 controls. Every rank check, DB write, and audit log call goes through
-fire_nation/merit.py and fire_nation/orders.py — the exact same functions the
+features/fire_nation/merit.py and orders.py — the exact same functions the
 slash-command handlers call — so the rules can't drift between the two entry
 points.
 """
@@ -11,8 +11,8 @@ import re
 import asyncpg
 import discord
 
-from fire_nation import merit, orders
-from fire_nation.ranks import RANK_ORDER, get_rank
+from bob.features.fire_nation import merit, orders
+from bob.features.fire_nation.ranks import RANK_ORDER, get_rank
 
 MERIT_SCHEMAS: list[dict] = [
     {

@@ -7,8 +7,8 @@ Kept: all Roblox monitoring + build calculator + read_webpage + analyze_image
 
 import time
 import aiosqlite
-from roblox_monitor.db import DB_PATH
-from roblox_monitor.config import MONITORED_GROUPS, SPIKE_WINDOW_SECONDS
+from bob.features.roblox_monitor.db import DB_PATH
+from bob.features.roblox_monitor.config import MONITORED_GROUPS, SPIKE_WINDOW_SECONDS
 
 # ---------------------------------------------------------------------------
 # Tool schemas (OpenAI / Groq function-calling format)
@@ -290,7 +290,7 @@ async def execute_roblox_tool(name: str, args: dict, ctx: dict | None = None) ->
         elif name == "get_spike_history":
             return await _get_spike_history(float(args.get("hours", 24)))
         elif name == "calculate_build_stats":
-            from conversation.build_calc import calculate_stats
+            from bob.features.roblox_monitor.build_calc import calculate_stats
             return calculate_stats(int(args.get("strength", 0)))
         elif name == "send_dashboard":
             return await _execute_send_dashboard(ctx or {})
@@ -310,7 +310,7 @@ async def execute_roblox_tool(name: str, args: dict, ctx: dict | None = None) ->
 # Implementations
 # ---------------------------------------------------------------------------
 
-from roblox_monitor.dashboard import HR_THRESHOLDS
+from bob.features.roblox_monitor.dashboard import HR_THRESHOLDS
 
 async def _get_online_hrs() -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -623,7 +623,7 @@ async def _find_player(username: str) -> dict:
                     if ptype == 1:
                         player_info["status"] = "Online (Website/App)"
                     elif ptype == 2:
-                        from roblox_monitor.config import TARGET_UNIVERSE_ID
+                        from bob.features.roblox_monitor.config import TARGET_UNIVERSE_ID
                         if u_id == TARGET_UNIVERSE_ID:
                             if g_id:
                                 if "-" in g_id:
@@ -653,8 +653,8 @@ async def _find_player(username: str) -> dict:
 async def _execute_send_dashboard(ctx: dict) -> dict:
     """Build and send the dashboard embed directly to the channel."""
     try:
-        from roblox_monitor.dashboard import build_dashboard_embed
-        from roblox_monitor.db import DB_PATH
+        from bob.features.roblox_monitor.dashboard import build_dashboard_embed
+        from bob.features.roblox_monitor.db import DB_PATH
         import aiosqlite
         embed = await build_dashboard_embed()
         message = ctx.get("message")

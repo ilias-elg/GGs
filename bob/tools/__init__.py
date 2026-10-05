@@ -226,7 +226,7 @@ async def execute_tool(name: str, args: dict, ctx: dict) -> dict:
         result = await execute_web_tool(name, args)
         # Cache webpage content in channel memory for follow-up questions
         if name == "read_webpage" and "content" in result and ctx.get("channel_id"):
-            from conversation import memory as mem
+            from bob.conversation import memory as mem
             mem.set_web_context(ctx["channel_id"], result["content"])
         return result
     elif name in VISION_TOOL_NAMES:

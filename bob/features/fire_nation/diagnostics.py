@@ -25,7 +25,7 @@ CheckLine = tuple[bool | None, str]
 
 async def run_ai_checks() -> list[CheckLine]:
     """One tiny real chat request — proves the configured provider answers."""
-    from ai import create_provider
+    from bob.ai import create_provider
 
     label = f"`{config.AI_PROVIDER}` / `{config.get_model()}`"
     started = time.monotonic()

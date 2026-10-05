@@ -25,9 +25,9 @@ from datetime import datetime, timezone
 import discord
 
 import config
-from conversation import memory as mem
-from fire_nation import knowledge, orders
-from fire_nation.ranks import RANK_LABELS, get_rank
+from bob.conversation import memory as mem
+from bob.features.fire_nation import knowledge, orders
+from bob.features.fire_nation.ranks import RANK_LABELS, get_rank
 
 
 # ---------------------------------------------------------------------------

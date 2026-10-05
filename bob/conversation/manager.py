@@ -25,10 +25,10 @@ from collections import defaultdict
 import discord
 
 import config
-from ai.base import AIProvider, AIResponse, ToolCall
-from conversation import memory as mem
-from conversation.context import build_context
-from tools import get_tools_for_context, execute_tool
+from bob.ai.base import AIProvider, AIResponse, ToolCall
+from bob.conversation import memory as mem
+from bob.conversation.context import build_context
+from bob.tools import get_tools_for_context, execute_tool
 
 logger = logging.getLogger("discord")
 
@@ -63,7 +63,7 @@ def _get_bg_provider() -> AIProvider:
         try:
             # Reuse the configured provider so OpenAI and Anthropic installs
             # do not unexpectedly attempt a Groq request in the background.
-            from ai import create_provider
+            from bob.ai import create_provider
             _bg_provider = create_provider()
             _bg_provider.model = config.get_background_model()
         except Exception:

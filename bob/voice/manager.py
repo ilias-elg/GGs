@@ -156,7 +156,7 @@ class VoiceManager:
         Returns (True, "") once the line has finished playing — or
         (False, reason) when it couldn't be.
         """
-        from fire_nation import tts
+        from bob.features.fire_nation import tts
 
         label = label or f'"{text[:60]}{"…" if len(text) > 60 else ""}"'
         if not self.current_channel(guild):

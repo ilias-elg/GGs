@@ -1,7 +1,7 @@
 """
 Merit business logic — the single place rank rules, DB writes, and audit
 logging live. Both the slash commands (cog.py) and the AI chat tools
-(tools/fire_nation_tools.py) call into this file rather than each
+(bob/tools/fire_nation_tools.py) call into this file rather than each
 re-implementing the rules, so a rule only ever needs to change in one place.
 """
 

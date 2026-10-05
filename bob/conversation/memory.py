@@ -14,7 +14,7 @@ import aiosqlite
 from collections import defaultdict, deque
 
 import config
-from roblox_monitor.db import DB_PATH
+from bob.features.roblox_monitor.db import DB_PATH
 
 # ---------------------------------------------------------------------------
 # In-memory short-term history (channel_id → deque of message dicts)

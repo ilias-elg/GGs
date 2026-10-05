@@ -27,7 +27,7 @@ AVATAR_ROTATION_SECONDS = 4 * 60 * 60
 # Drop files with these names into assets/ to enable them. They are read once
 # at import; a missing file just means that visual is skipped.
 
-_ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(config.__file__)), "assets")
 
 
 def _read_asset(*names: str) -> bytes | None:
