@@ -296,11 +296,16 @@ class FireNationCog(commands.Cog):
                     "(right-click the conclusion message → Copy Message Link). It looks like "
                     "`https://discord.com/channels/<guild_id>/<channel_id>/<message_id>`."
                 )
-            mention_ids = extract_mention_ids(announcement)
-            if not mention_ids:
-                raise merit.MeritError(
-                    "No @mentions found in the announcement. Make sure you pasted the full conclusion text."
-                )
+            # Merits are for running an exam, not for passing it: only the
+            # Co-host and Guards lines of the pasted post are counted.
+            if merit_type == "exam":
+                mention_ids = extract_mention_ids(conclusions.exam_counted_text(announcement))
+            else:
+                mention_ids = extract_mention_ids(announcement)
+                if not mention_ids:
+                    raise merit.MeritError(
+                        "No @mentions found in the announcement. Make sure you pasted the full conclusion text."
+                    )
             for lead, label in ((host, "host"), (cohost, "co-host")):
                 if lead is None:
                     continue
@@ -328,6 +333,11 @@ class FireNationCog(commands.Cog):
             await merit.record_awards(guild.id, awards, proof, actor)
             await merit.audit_award(self.bot, awards, label, actor, proof, host=host, cohost=cohost)
 
+            exam_note = ""
+            if merit_type == "exam":
+                exam_note = "\n• Only the **Co-host** and **Guards** lines were counted — passing an exam earns no merit."
+                if not mention_ids:
+                    exam_note += " No pings were found on those lines, so only the host was credited."
             cohost_note = ""
             if cohost:
                 pinged = any(m.id == cohost.id for m in recipients)
@@ -339,15 +349,15 @@ class FireNationCog(commands.Cog):
                 f"Recorded **+{merit.fmt_amount(amount)}** {label} merit{merit.plural(amount)} for "
                 f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'} (Host: {host})"
                 f"{_skipped_note(len(mention_ids) - mentioned_count)} — logged for owners."
-                f"{cohost_note}\n• **Proof:** <{proof}>"
+                f"{cohost_note}{exam_note}\n• **Proof:** <{proof}>"
             ))
         except merit.MeritError as e:
             logger.warning(f"Merit award rejected for {actor.id}: {e}")
             await interaction.edit_original_response(content=f"Could not record the award: {e}")
 
-    @addmerit.command(name="exam", description="Award 1 merit to all participants. Paste the conclusion announcement.")
+    @addmerit.command(name="exam", description="Award 1 merit to the host, co-host and guards. Paste the conclusion.")
     @app_commands.describe(
-        announcement="Paste the full exam conclusion — every @mention is extracted automatically.",
+        announcement="Paste the full exam conclusion — the Co-host and Guards lines are counted, not Passed.",
         proof="Discord message link as proof",
         host="The host who ran this exam — receives the merit.",
         cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",

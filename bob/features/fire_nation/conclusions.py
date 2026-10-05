@@ -33,18 +33,21 @@ _TITLE_NOISE = re.compile(r"<a?:\w+:\d+>|[#*_`『』]")
 # (keyword, merit type whose rules apply, name shown on the card, the labelled
 # lines whose pings earn the merit — None means every ping in the post)
 _COHOST = r"co[\s-]?host"
+_EXAM_LABELS = rf"{_COHOST}|guards?"
 _TYPE_KEYWORDS = (
     ("raid", "raid", "Raid", None),
     # Merits are for running an exam, not for passing it: the people on the
     # "Passed:" line get nothing.
-    ("exam", "exam", "Exam", rf"{_COHOST}|guards?"),
-    ("induction", "exam", "Exam", rf"{_COHOST}|guards?"),
+    ("exam", "exam", "Exam", _EXAM_LABELS),
+    ("induction", "exam", "Exam", _EXAM_LABELS),
     # A training is worth the same as an event. Its post also pings winners
     # and teams, which don't count.
     ("training", "event", "Training", rf"{_COHOST}|attendees?"),
     ("event", "event", "Event", None),
 )
-_ANY_LABEL = re.compile(r"^[\s*_>#-]*[A-Za-z][\w -]{0,30}:")
+# "Something:" anywhere in the text. The lookarounds keep timestamps (<t:1:R>),
+# emoji (<:name:1>, :name:) and links (https://) from counting as labels.
+_LABEL = re.compile(r"(?<![\w<:@/])([A-Za-z][A-Za-z -]{0,30}):(?!\d|//)")
 
 # Two people pressing Approve at once must not both get past the duplicate check.
 _approval_lock = asyncio.Lock()
@@ -77,20 +80,26 @@ def read_title(content: str) -> tuple[str, str, str | None, str] | None:
 def counted_text(content: str, labels: str) -> str:
     """
     Only the sections of a post whose label matches (e.g. "Co-host:" and
-    "Attendees:"). A section runs
-    from its label to the next blank line or the next "Something:" label, so a
-    long attendee list can wrap over several lines.
+    "Guards:"), one per line with its label. A section runs from its label to
+    the next "Something:" label or blank line, so a long list can wrap over
+    several lines — and it still works on text pasted into a slash command,
+    where the whole post arrives as a single line.
     """
-    counted_label = re.compile(rf"^[\s*_>#-]*(?:{labels})\b[^:\n]*:", re.IGNORECASE)
-    kept, inside = [], False
-    for line in content.splitlines():
-        if counted_label.match(line):
-            inside = True
-        elif not line.strip() or _ANY_LABEL.match(line):
-            inside = False
-        if inside:
-            kept.append(line)
+    counted = re.compile(rf"\b(?:{labels})\b", re.IGNORECASE)
+    found = list(_LABEL.finditer(content))
+    kept = []
+    for index, label in enumerate(found):
+        if not counted.search(label.group(1)):
+            continue
+        end = found[index + 1].start() if index + 1 < len(found) else len(content)
+        section = re.split(r"\n\s*\n", content[label.end():end], maxsplit=1)[0]
+        kept.append(f"{label.group(1)}: {' '.join(section.split())}")
     return "\n".join(kept)
+
+
+def exam_counted_text(content: str) -> str:
+    """The part of an exam post whose pings earn the merit — for /addmerit exam."""
+    return counted_text(content, _EXAM_LABELS)
 
 
 async def _member(guild: discord.Guild, user_id: int) -> discord.Member | None:
