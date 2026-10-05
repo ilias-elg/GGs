@@ -260,10 +260,6 @@ class ConclusionButton(
             f"Approved by {merit._who(actor)}",
             _card(plan, message, f"{plan.label} merits recorded", config.FIRE_ORANGE),
         )
-        try:
-            await message.add_reaction("✅")
-        except discord.HTTPException:
-            pass
 
 
 async def handle_message(bot: discord.Client, message: discord.Message) -> None:
