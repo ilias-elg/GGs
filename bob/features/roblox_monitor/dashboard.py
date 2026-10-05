@@ -33,13 +33,13 @@ HR_THRESHOLDS = {
 MAX_SERVERS_SHOWN = 15
 
 # ── Public server list ────────────────────────────────────────────────────────
-# The dashboard redraws every few seconds, but the list of public servers only
-# needs refreshing about once a minute — asking Roblox on every redraw got the
-# host's IP refused, and every server was then shown as public. A list that
-# could not be refreshed is reused for a while; with no list at all the
+# Refreshed once per presence scan, each time through the next proxy, so any
+# one IP asks only every few minutes. Asking on every redraw from the host's
+# own IP got it refused, and every server was then shown as public. A list
+# that could not be refreshed is reused for a while; with no list at all the
 # servers are shown without claiming to know which kind they are.
 
-PUBLIC_SERVERS_REFRESH_SECONDS = 60
+PUBLIC_SERVERS_REFRESH_SECONDS = 20
 PUBLIC_SERVERS_MAX_AGE_SECONDS = 10 * 60
 
 _public_servers: dict | None = None
@@ -74,7 +74,7 @@ async def _fetch_public_servers() -> dict | None:
 
 
 async def _get_public_job_ids() -> dict | None:
-    """The public server list, at most a minute old when Roblox is answering; None when it isn't known."""
+    """The public server list, refreshed every 20 seconds while Roblox is answering; None when it isn't known."""
     global _public_servers, _public_servers_at, _public_servers_tried_at
     now = time.monotonic()
     if now - _public_servers_tried_at >= PUBLIC_SERVERS_REFRESH_SECONDS or _public_servers_tried_at == 0:
