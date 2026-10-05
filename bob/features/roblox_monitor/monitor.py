@@ -170,21 +170,23 @@ class MonitorTasks:
                     ptype = p.get('userPresenceType', 0)
                     user_id = p.get('userId')
 
-                    if ptype == 1:
-                        # Online on Roblox but not in a game
+                    if ptype in (1, 3):
+                        # Online on Roblox but not in a game (3 = in Studio)
                         online_players += 1
                         records.append((now, user_id, None, None, 1))
 
                     elif ptype == 2:
-                        # In-game
+                        # In-game. Roblox hides which game for members whose
+                        # privacy settings don't share it: they are still
+                        # online and playing, just with no universe or server.
                         uid = p.get('universeId')
                         game_id = p.get('gameId')
 
+                        active_players += 1
+                        records.append((now, user_id, uid, game_id, 2))
                         if uid:
-                            active_players += 1
                             if game_id is None:
                                 null_game_id_count += 1
-                            records.append((now, user_id, uid, game_id, 2))
                             new_universes.add(uid)
                 
                 # Check known games and fetch missing names
@@ -212,8 +214,13 @@ class MonitorTasks:
                 
                 # 5. Update bot status
                 await db.execute('INSERT OR REPLACE INTO bot_status (key, value) VALUES (?, ?)', ('last_scan_time', str(now)))
+                # How fresh the data behind that scan is, for the dashboard.
+                await db.execute(
+                    'INSERT OR REPLACE INTO bot_status (key, value) VALUES (?, ?)',
+                    ('last_scan_coverage', f"{len(fresh)}/{len(user_ids)}/{oldest}"),
+                )
                 await db.commit()
-                
+
                 duration = time.time() - start_time
                 logger.info(
                     f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players} "

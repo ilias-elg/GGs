@@ -312,6 +312,11 @@ async def execute_roblox_tool(name: str, args: dict, ctx: dict | None = None) ->
 
 from bob.features.roblox_monitor.dashboard import HR_THRESHOLDS
 
+
+def _unnamed_game(universe_id) -> str:
+    """Rows with no universe are members who are online outside a game, or in a game their privacy settings hide."""
+    return "Online, not in a game or game hidden" if universe_id is None else f"Universe {universe_id}"
+
 async def _get_online_hrs() -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
         last_ts = await _latest_scan_ts(db)
@@ -408,7 +413,7 @@ async def _get_group_status(group_name: str) -> dict:
             GROUP BY h.universe_id ORDER BY cnt DESC LIMIT 5
         """, (group_id, last_ts)) as cur:
             games = [
-                {"game": row[2] or f"Universe {row[0]}", "players": row[1]}
+                {"game": row[2] or _unnamed_game(row[0]), "players": row[1]}
                 for row in await cur.fetchall()
             ]
 
@@ -457,7 +462,7 @@ async def _get_active_games() -> dict:
 
         games = []
         for uid, total, name in game_rows:
-            game_entry = {"game": name or f"Universe {uid}", "total_players": total, "by_group": {}}
+            game_entry = {"game": name or _unnamed_game(uid), "total_players": total, "by_group": {}}
             for gid, gname in MONITORED_GROUPS.items():
                 async with db.execute("""
                     SELECT COUNT(DISTINCT h.user_id)
@@ -634,6 +639,8 @@ async def _find_player(username: str) -> dict:
                                 player_info["status"] = f"In-game (The Shattered Balance) - Server ID: {short_id}"
                             else:
                                 player_info["status"] = "In-game (The Shattered Balance) - Unassigned Server"
+                        elif u_id is None:
+                            player_info["status"] = "In-game (which game is hidden by their privacy settings)"
                         else:
                             async with db.execute("SELECT name FROM known_games WHERE universe_id = ?", (u_id,)) as gcur:
                                 grow = await gcur.fetchone()

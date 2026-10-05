@@ -1,11 +1,16 @@
-import aiosqlite
+import itertools
+import logging
 import time
-import discord
-import aiohttp
 from datetime import datetime, timezone
 
-from .config import MONITORED_GROUPS, TARGET_UNIVERSE_ID, TARGET_PLACE_ID
+import aiohttp
+import aiosqlite
+import discord
+
+from .config import MONITORED_GROUPS, ROBLOX_PROXY_LIST, TARGET_UNIVERSE_ID, TARGET_PLACE_ID
 from .db import DB_PATH
+
+logger = logging.getLogger('discord')
 
 DASHBOARD_COLOR = 0xC0392B  # Vivid crimson red
 
@@ -25,30 +30,61 @@ HR_THRESHOLDS = {
     44315578: 8     # Fire: Lieutenant
 }
 
-async def _get_public_job_ids() -> dict:
-    """Fetches up to 500 public servers to get total player counts."""
-    url = f"https://games.roblox.com/v1/games/{TARGET_PLACE_ID}/servers/Public?limit=100"
+MAX_SERVERS_SHOWN = 15
+
+# ── Public server list ────────────────────────────────────────────────────────
+# The dashboard redraws every few seconds, but the list of public servers only
+# needs refreshing about once a minute — asking Roblox on every redraw got the
+# host's IP refused, and every server was then shown as public. A list that
+# could not be refreshed is reused for a while; with no list at all the
+# servers are shown without claiming to know which kind they are.
+
+PUBLIC_SERVERS_REFRESH_SECONDS = 60
+PUBLIC_SERVERS_MAX_AGE_SECONDS = 10 * 60
+
+_public_servers: dict | None = None
+_public_servers_at = 0.0
+_public_servers_tried_at = 0.0
+_proxy_cycle = itertools.cycle(ROBLOX_PROXY_LIST) if ROBLOX_PROXY_LIST else None
+
+
+async def _fetch_public_servers() -> dict | None:
+    """{server id: players in it} for every public server, or None unless the whole list was read."""
+    url = f"https://games.roblox.com/v1/games/{TARGET_PLACE_ID}/servers/Public"
+    proxy = next(_proxy_cycle) if _proxy_cycle else None
     results = {}
     cursor = ""
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             for _ in range(10):
-                page_url = url if not cursor else f"{url}&cursor={cursor}"
-                async with session.get(page_url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for s in data.get("data", []):
-                            if "id" in s:
-                                results[s["id"]] = s.get("playing", 0)
-                        
-                        cursor = data.get("nextPageCursor")
-                        if not cursor:
-                            break
-                    else:
-                        break
+                params = {"limit": 100, **({"cursor": cursor} if cursor else {})}
+                async with session.get(url, params=params, proxy=proxy) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json()
+                for s in data.get("data", []):
+                    if "id" in s:
+                        results[s["id"]] = s.get("playing", 0)
+                cursor = data.get("nextPageCursor")
+                if not cursor:
+                    return results
     except Exception:
-        pass
+        return None
     return results
+
+
+async def _get_public_job_ids() -> dict | None:
+    """The public server list, at most a minute old when Roblox is answering; None when it isn't known."""
+    global _public_servers, _public_servers_at, _public_servers_tried_at
+    now = time.monotonic()
+    if now - _public_servers_tried_at >= PUBLIC_SERVERS_REFRESH_SECONDS or _public_servers_tried_at == 0:
+        _public_servers_tried_at = now
+        fresh = await _fetch_public_servers()
+        if fresh is not None:
+            _public_servers, _public_servers_at = fresh, now
+    if _public_servers is not None and now - _public_servers_at > PUBLIC_SERVERS_MAX_AGE_SECONDS:
+        _public_servers = None
+    return _public_servers
 
 
 async def _latest_ts(db) -> int | None:
@@ -59,7 +95,7 @@ async def _latest_ts(db) -> int | None:
                 return int(row[0])
     except Exception:
         pass
-        
+
     # Fallback if bot_status fails or doesn't exist yet
     async with db.execute("SELECT MAX(timestamp) FROM presence_history") as cur:
         row = await cur.fetchone()
@@ -78,6 +114,30 @@ async def _scan_age(last_ts: int | None) -> tuple[str, bool]:
     else:
         mins = ago // 60
         return f"🔴  {mins}m ago — DATA STALE", True
+
+
+async def _coverage_line(db) -> str:
+    """How much of the roster the last scan re-checked — a scan can only refresh what the rate limit allows."""
+    try:
+        async with db.execute("SELECT value FROM bot_status WHERE key = 'last_scan_coverage'") as cur:
+            row = await cur.fetchone()
+        refreshed, total, oldest = (int(x) for x in row[0].split("/"))
+    except Exception:
+        return ""
+    if refreshed >= total:
+        return "  COVERAGE    every member checked\n"
+    return f"  COVERAGE    {refreshed}/{total} re-checked · oldest {oldest}s\n"
+
+
+def _short_server_id(job_id: str) -> str:
+    # The game and extension use the 2nd and 3rd blocks of the UUID
+    # e.g. "2d8f3baf-7104-4802-..." -> "7104-4802"
+    parts = job_id.split("-")
+    return f"{parts[1]}-{parts[2]}" if len(parts) >= 3 else job_id
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}{'' if count == 1 else 's'}"
 
 
 async def build_dashboard_embed() -> discord.Embed:
@@ -100,83 +160,102 @@ async def build_dashboard_embed() -> discord.Embed:
         embed.description = (
             f"```\n"
             f"  LAST SCAN   {scan_str}\n"
+            f"{await _coverage_line(db) if last_ts else ''}"
             f"```"
         )
 
-        # ── PER-GROUP INLINE FIELDS (3 across) ──────────────────────────────
-        group_stats = {
-            gid: {"tracked": 0, "online_only": 0, "other_game": 0, "ingame": 0, "unassigned": 0}
-            for gid in MONITORED_GROUPS
-        }
-        totals = {"tracked": 0, "online": 0, "ingame": 0, "other_game": 0, "unassigned": 0}
-
-        # 1. Deduplicate Tracked Members (assign to highest rank group)
-        async with db.execute("SELECT user_id, group_id, rank FROM group_members") as cur:
+        # ── Everything below is computed from these two reads ───────────────
+        async with db.execute("SELECT user_id, group_id, rank, username FROM group_members") as cur:
             all_memberships = await cur.fetchall()
-            
-        user_best_group = {}
-        for uid, gid, rank in all_memberships:
-            if uid not in user_best_group or rank > user_best_group[uid]['rank']:
-                user_best_group[uid] = {'gid': gid, 'rank': rank}
-                
-        for uid, data in user_best_group.items():
-            gid = data['gid']
-            if gid in group_stats:
-                group_stats[gid]["tracked"] += 1
-                totals["tracked"] += 1
 
-        # 2. Fetch and Deduplicate Presence
+        presences = []
         if last_ts:
             async with db.execute('''
-                SELECT user_id, presence_type, universe_id, game_id 
-                FROM presence_history 
+                SELECT user_id, presence_type, universe_id, game_id
+                FROM presence_history
                 WHERE timestamp = ?
             ''', (last_ts,)) as cur:
                 presences = await cur.fetchall()
-                
-            for uid, ptype, universe_id, game_id in presences:
-                if uid in user_best_group:
-                    gid = user_best_group[uid]['gid']
-                    if gid not in group_stats:
-                        continue
-                        
-                    if ptype == 1:
-                        group_stats[gid]["online_only"] += 1
-                        totals["online"] += 1
-                    elif ptype == 2:
-                        if universe_id == TARGET_UNIVERSE_ID:
-                            group_stats[gid]["ingame"] += 1
-                            totals["ingame"] += 1
-                            totals["online"] += 1
-                            if game_id is None:
-                                group_stats[gid]["unassigned"] += 1
-                                totals["unassigned"] += 1
-                        else:
-                            group_stats[gid]["other_game"] += 1
-                            totals["other_game"] += 1
-                            totals["online"] += 1
+
+        # A member of several groups is counted once, in the group where
+        # their rank is highest.
+        user_best_group = {}
+        usernames = {}
+        hr_groups = {}  # user_id → short names of the groups they are HR in
+        for uid, gid, rank, username in all_memberships:
+            if gid not in MONITORED_GROUPS:
+                continue
+            if uid not in user_best_group or rank > user_best_group[uid]['rank']:
+                user_best_group[uid] = {'gid': gid, 'rank': rank}
+            if username:
+                usernames[uid] = username
+            if rank > HR_THRESHOLDS.get(gid, 999):
+                hr_groups.setdefault(uid, []).append(MONITORED_GROUPS[gid].replace("TSB ", ""))
+
+        # ── PER-GROUP INLINE FIELDS (3 across) ──────────────────────────────
+        group_stats = {
+            gid: {"tracked": 0, "online_only": 0, "other_game": 0, "hidden_game": 0, "ingame": 0, "unassigned": 0}
+            for gid in MONITORED_GROUPS
+        }
+        totals = {"tracked": 0, "online": 0, "ingame": 0, "other_game": 0, "hidden_game": 0, "unassigned": 0}
+
+        for data in user_best_group.values():
+            group_stats[data['gid']]["tracked"] += 1
+            totals["tracked"] += 1
+
+        servers = {}  # server id → user ids of tracked members in it
+        seen = set()
+        for uid, ptype, universe_id, game_id in presences:
+            if uid not in user_best_group or uid in seen or ptype not in (1, 2):
+                continue
+            seen.add(uid)
+            stats = group_stats[user_best_group[uid]['gid']]
+            totals["online"] += 1
+
+            if ptype == 1:
+                stats["online_only"] += 1
+            elif universe_id == TARGET_UNIVERSE_ID:
+                stats["ingame"] += 1
+                totals["ingame"] += 1
+                if game_id is None:
+                    stats["unassigned"] += 1
+                    totals["unassigned"] += 1
+                else:
+                    servers.setdefault(game_id, []).append(uid)
+            elif universe_id is None:
+                # In a game, but their privacy settings hide which one.
+                stats["hidden_game"] += 1
+                totals["hidden_game"] += 1
+            else:
+                stats["other_game"] += 1
+                totals["other_game"] += 1
+
+        def extras_for(stats) -> list[str]:
+            extras = []
+            if stats["other_game"] > 0:
+                extras.append(f"{stats['other_game']} in other games")
+            if stats["hidden_game"] > 0:
+                extras.append(f"{stats['hidden_game']} in a hidden game")
+            if stats["unassigned"] > 0:
+                extras.append(f"{stats['unassigned']} playing, server hidden")
+            return extras
 
         for group_id, group_name in MONITORED_GROUPS.items():
             emoji = GROUP_EMOJI.get(group_name, "●")
             stats = group_stats[group_id]
 
             if last_ts:
-                total_online = stats["online_only"] + stats["other_game"] + stats["ingame"]
-                
+                total_online = (
+                    stats["online_only"] + stats["other_game"] + stats["hidden_game"] + stats["ingame"]
+                )
+
                 field_value = (
                     f"👥  **{stats['tracked']}** tracked\n"
                     f"🟢  **{total_online}** online\n"
                     f"🎮  **{stats['ingame']}** playing"
                 )
-                
-                extras = []
-                if stats["other_game"] > 0:
-                    extras.append(f"{stats['other_game']} in other games")
-                if stats["unassigned"] > 0:
-                    extras.append(f"{stats['unassigned']} unassigned server")
-                    
-                if extras:
-                    field_value += f"\n> *{', '.join(extras)}*"
+                for extra in extras_for(stats):
+                    field_value += f"\n> *{extra}*"
             else:
                 field_value = (
                     f"👥  **{stats['tracked']}** tracked\n"
@@ -190,135 +269,97 @@ async def build_dashboard_embed() -> discord.Embed:
             )
 
         # Totals row (full width)
-        total_extras = []
-        if totals["other_game"] > 0:
-            total_extras.append(f"{totals['other_game']} in other games")
-        if totals["unassigned"] > 0:
-            total_extras.append(f"{totals['unassigned']} unassigned server")
-            
         totals_text = (
             f"**Total:**  {totals['tracked']} tracked  ·  "
             f"{totals['online']} online  ·  "
             f"{totals['ingame']} playing **The Shattered Balance**"
         )
+        total_extras = extras_for(totals)
         if total_extras:
-            totals_text += f"\n*({', '.join(total_extras)})*"
-            
+            totals_text += f"\n*({'  ·  '.join(total_extras)})*"
+
         embed.add_field(
-            name="\u200b",  # zero-width space — blank separator
+            name="​",  # zero-width space — blank separator
             value=totals_text,
             inline=False,
         )
 
         # ── ACTIVE SERVERS (TARGET GAME ONLY) ────────────────────────────────
-        if last_ts:
-            async with db.execute("""
-                SELECT game_id, COUNT(DISTINCT user_id) as cnt
-                FROM presence_history
-                WHERE timestamp = ? AND game_id IS NOT NULL AND presence_type = 2 AND universe_id = ?
-                GROUP BY game_id
-                ORDER BY cnt DESC LIMIT 15
-            """, (last_ts, TARGET_UNIVERSE_ID)) as cur:
-                server_rows = await cur.fetchall()
-        else:
-            server_rows = []
+        if servers:
+            public_jobs = await _get_public_job_ids()
+            ranked = sorted(servers.items(), key=lambda item: (-len(item[1]), item[0]))
+            shown, hidden = ranked[:MAX_SERVERS_SHOWN], ranked[MAX_SERVERS_SHOWN:]
 
-        if server_rows:
             public_server_lines = []
             private_server_lines = []
-            public_jobs = await _get_public_job_ids()
-            
-            for job_id, cnt in server_rows:
-                # Fetch ALL group memberships for users in this server
-                async with db.execute("""
-                    SELECT h.user_id, gm.group_id, gm.rank, gm.username
-                    FROM presence_history h JOIN group_members gm ON h.user_id = gm.user_id
-                    WHERE h.timestamp = ? AND h.game_id = ? AND h.presence_type = 2
-                """, (last_ts, job_id)) as cur2:
-                    all_memberships = await cur2.fetchall()
-                
-                # Deduplicate users: assign to the group where they have the highest rank
-                user_best_group = {}
-                hrs_dict = {}
-                
-                for uid, gid, rank, username in all_memberships:
-                    if uid not in user_best_group or rank > user_best_group[uid]['rank']:
-                        user_best_group[uid] = {'gid': gid, 'rank': rank}
-                        
-                    # Also collect HR info (list all HR roles they hold)
-                    threshold = HR_THRESHOLDS.get(gid, 999)
-                    if rank > threshold:
-                        uname = username or str(uid)
-                        if uname not in hrs_dict:
-                            hrs_dict[uname] = []
-                        short_name = MONITORED_GROUPS[gid].replace("TSB ", "")
-                        hrs_dict[uname].append(short_name)
-                        
-                # Tally unique counts per group based on their highest ranked group
-                group_tally = {}
-                for uid, data in user_best_group.items():
-                    gid = data['gid']
-                    group_tally[gid] = group_tally.get(gid, 0) + 1
-                    
-                group_parts = []
-                for gid, grpname in MONITORED_GROUPS.items():
-                    if gid in group_tally:
-                        short = grpname.replace("TSB ", "")
-                        group_parts.append(f"{short}: {group_tally[gid]}")
+            unknown_server_lines = []
 
-                breakdown = "  ·  ".join(group_parts)
-                
-                # The game and extension use the 2nd and 3rd blocks of the UUID
-                # e.g. "2d8f3baf-7104-4802-..." -> "7104-4802"
-                if "-" in job_id:
-                    parts = job_id.split("-")
-                    if len(parts) >= 3:
-                        short_id = f"{parts[1]}-{parts[2]}"
-                    else:
-                        short_id = job_id
+            for job_id, members in shown:
+                cnt = len(members)
+                group_tally = {}
+                for uid in members:
+                    gid = user_best_group[uid]['gid']
+                    group_tally[gid] = group_tally.get(gid, 0) + 1
+                breakdown = "  ·  ".join(
+                    f"{grpname.replace('TSB ', '')} {group_tally[gid]}"
+                    for gid, grpname in MONITORED_GROUPS.items() if gid in group_tally
+                )
+
+                short_id = _short_server_id(job_id)
+                if public_jobs is not None and job_id in public_jobs:
+                    line = (
+                        f"🔗  `{short_id}`  **{_plural(public_jobs[job_id], 'player')}**  ·  "
+                        f"{cnt} tracked  —  {breakdown}"
+                    )
                 else:
-                    short_id = job_id
-                    
-                is_private = job_id not in public_jobs if public_jobs else False
-                
-                if not is_private and job_id in public_jobs:
-                    total_players = public_jobs[job_id]
-                    line = f"🔗  **{total_players} players** in server `ID: {short_id}`\n> 🛡️ **{cnt} group members:** {breakdown}"
-                else:
-                    line = f"🔗  **{cnt} tracked members** in server `ID: {short_id}`\n> 🛡️ **Breakdown:** {breakdown}"
-                
-                if hrs_dict:
-                    hr_strings = [f"**{uname}** ({'/'.join(groups)})" for uname, groups in hrs_dict.items()]
-                    line += f"\n> ⚠️ **HRs Present:** {', '.join(hr_strings)}"
-                    
-                if is_private:
-                    private_server_lines.append(line)
-                else:
+                    line = f"🔗  `{short_id}`  **{cnt} tracked**  —  {breakdown}"
+
+                hrs = [
+                    f"**{usernames.get(uid, uid)}** ({'/'.join(hr_groups[uid])})"
+                    for uid in members if uid in hr_groups
+                ]
+                if hrs:
+                    line += f"\n> ⚠️ HR: {', '.join(hrs)}"
+
+                if public_jobs is None:
+                    unknown_server_lines.append(line)
+                elif job_id in public_jobs:
                     public_server_lines.append(line)
+                else:
+                    private_server_lines.append(line)
 
             def add_chunked_fields(title, lines):
                 current_chunk = []
                 current_len = 0
                 part = 1
                 for line in lines:
-                    if current_len + len(line) + 2 > 1000:
+                    if current_len + len(line) + 1 > 1000:
                         name = title if part == 1 else f"{title} (Part {part})"
-                        embed.add_field(name=name, value="\n\n".join(current_chunk), inline=False)
+                        embed.add_field(name=name, value="\n".join(current_chunk), inline=False)
                         current_chunk = [line]
                         current_len = len(line)
                         part += 1
                     else:
                         current_chunk.append(line)
-                        current_len += len(line) + 2
-                
+                        current_len += len(line) + 1
+
                 if current_chunk:
                     name = title if part == 1 else f"{title} (Part {part})"
-                    embed.add_field(name=name, value="\n\n".join(current_chunk), inline=False)
+                    embed.add_field(name=name, value="\n".join(current_chunk), inline=False)
+
+            if hidden:
+                more = (
+                    f"*…and {_plural(len(hidden), 'more server')} with "
+                    f"{_plural(sum(len(m) for _, m in hidden), 'tracked member')}*"
+                )
+                (unknown_server_lines or private_server_lines or public_server_lines).append(more)
 
             if public_server_lines:
                 add_chunked_fields("🖥️  Active Public Servers", public_server_lines)
             if private_server_lines:
                 add_chunked_fields("🔒  Active Private Servers", private_server_lines)
+            if unknown_server_lines:
+                add_chunked_fields("🖥️  Active Servers (public / private not known right now)", unknown_server_lines)
         else:
             embed.add_field(
                 name="🖥️  Active Servers (The Shattered Balance)",
@@ -338,9 +379,8 @@ async def build_dashboard_embed() -> discord.Embed:
         if alert_rows:
             alert_lines = []
             for ts, level in alert_rows:
-                t = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M")
                 icon = ALERT_ICONS.get(level, "⚪")
-                alert_lines.append(f"{icon}  `{t}`  —  {level} SPIKE")
+                alert_lines.append(f"{icon}  <t:{ts}:t>  —  {level} SPIKE  (<t:{ts}:R>)")
 
             embed.add_field(
                 name="🚨  Recent Spike Alerts",
@@ -356,7 +396,7 @@ async def build_dashboard_embed() -> discord.Embed:
 
         # ── FOOTER ───────────────────────────────────────────────────────────
         embed.set_footer(
-            text="🔄 Dash updates every 20s  ·  📡 Scan every 20s  ·  🔁 Group sync every 5m  ·  Last updated"
+            text="🔄 Dash updates every 15s  ·  📡 Scan every 20s  ·  🔁 Group sync every 5m  ·  Last updated"
         )
 
     return embed
