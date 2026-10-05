@@ -7,7 +7,9 @@ import aiohttp
 import aiosqlite
 import discord
 
-from .config import MONITORED_GROUPS, ROBLOX_PROXY_LIST, TARGET_UNIVERSE_ID, TARGET_PLACE_ID
+from .config import (
+    LOW_PRIORITY_GROUP_IDS, MONITORED_GROUPS, ROBLOX_PROXY_LIST, TARGET_UNIVERSE_ID, TARGET_PLACE_ID,
+)
 from .db import DB_PATH
 
 logger = logging.getLogger('discord')
@@ -121,12 +123,17 @@ async def _coverage_line(db) -> str:
     try:
         async with db.execute("SELECT value FROM bot_status WHERE key = 'last_scan_coverage'") as cur:
             row = await cur.fetchone()
-        refreshed, total, oldest = (int(x) for x in row[0].split("/"))
+        refreshed, total, oldest, *rest = (int(x) for x in row[0].split("/"))
     except Exception:
         return ""
     if refreshed >= total:
         return "  COVERAGE    every member checked\n"
-    return f"  COVERAGE    {refreshed}/{total} re-checked · oldest {oldest}s\n"
+    line = f"  COVERAGE    {refreshed}/{total} re-checked · oldest {oldest}s\n"
+    # Groups that are deliberately checked less often get their own figure.
+    low_names = [name.replace("TSB ", "") for gid, name in MONITORED_GROUPS.items() if gid in LOW_PRIORITY_GROUP_IDS]
+    if rest and rest[0] and low_names:
+        line += f"              {'/'.join(low_names)} checked less often · oldest {rest[0]}s\n"
+    return line
 
 
 def _short_server_id(job_id: str) -> str:

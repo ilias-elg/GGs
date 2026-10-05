@@ -8,6 +8,15 @@ MONITORED_GROUPS = {
     44315578: "TSB Fire"
 }
 
+# Groups whose members are checked less often, so the scan's limited capacity
+# goes to the others first. A member of one of these and of a normal group is
+# checked at the normal rate.
+LOW_PRIORITY_GROUP_IDS = frozenset(
+    int(x) for x in os.getenv("ROBLOX_LOW_PRIORITY_GROUP_IDS", "44315578").split(",") if x.strip().isdigit()
+)  # default: TSB Fire
+# How many times staler a low-priority member's reading may get than everyone else's.
+LOW_PRIORITY_FACTOR = 3
+
 # Scanning and Syncing Intervals
 # Measured against the live API (the x-ratelimit headers advertise 60 a
 # minute, but that is not the limit that bites): an IP gets a burst of about

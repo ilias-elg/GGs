@@ -8,6 +8,7 @@ from datetime import datetime
 
 from .config import (
     MONITORED_GROUPS, PRESENCE_SCAN_INTERVAL, GROUP_SYNC_INTERVAL,
+    LOW_PRIORITY_GROUP_IDS, LOW_PRIORITY_FACTOR,
     PRESENCE_BATCH_SIZE, PRESENCE_STARTUP_DELAY_SECONDS,
     TARGET_UNIVERSE_ID,
     SPIKE_WINDOW_SECONDS, ALERT_THRESHOLD_INFO, ALERT_THRESHOLD_WARNING,
@@ -89,20 +90,27 @@ class MonitorTasks:
     async def before_sync(self):
         await self.bot.wait_until_ready()
 
-    def _users_to_refresh(self, user_ids):
+    def _users_to_refresh(self, user_ids, low_priority=frozenset()):
         """
         The members this scan checks: everyone who was online last time (or
         has never been checked), then the ones checked longest ago, up to what
-        the rate limit allows.
+        the rate limit allows. Low-priority members wait LOW_PRIORITY_FACTOR
+        times longer for their turn, online or not.
         """
         limit = self.client.presence_batch_budget() * PRESENCE_BATCH_SIZE
         if len(user_ids) <= limit:
             return user_ids
 
+        now = time.time()
+
         def priority(user_id):
             cached = self._presence_cache.get(user_id)
+            age = now - self._presence_checked_at.get(user_id, 0)
             online = cached is None or cached.get('userPresenceType', 0) != 0
-            return (not online, self._presence_checked_at.get(user_id, 0))
+            if cached is not None and user_id in low_priority:
+                online = online and age >= LOW_PRIORITY_FACTOR * PRESENCE_SCAN_INTERVAL
+                age /= LOW_PRIORITY_FACTOR
+            return (not online, -age)
 
         return sorted(user_ids, key=priority)[:limit]
 
@@ -112,9 +120,12 @@ class MonitorTasks:
         try:
             async with aiosqlite.connect(DB_PATH, timeout=15.0) as db:
                 # 1. Get all unique users
-                async with db.execute('SELECT DISTINCT user_id FROM group_members') as cursor:
+                async with db.execute('SELECT user_id, group_id FROM group_members') as cursor:
                     rows = await cursor.fetchall()
-                    user_ids = [r[0] for r in rows]
+                    user_ids = list(dict.fromkeys(r[0] for r in rows))
+                # Low priority only if every group they are in is low priority.
+                normal = {r[0] for r in rows if r[1] not in LOW_PRIORITY_GROUP_IDS}
+                low_priority = frozenset(u for u in user_ids if u not in normal)
                 
                 if not user_ids:
                     self.last_scan_status = "SUCCESS"
@@ -128,7 +139,7 @@ class MonitorTasks:
                 # A presence scan owns Roblox API access until all its
                 # batches finish, preventing a group-sync burst from causing
                 # a mid-scan throttle.
-                to_refresh = self._users_to_refresh(user_ids)
+                to_refresh = self._users_to_refresh(user_ids, low_priority)
                 async with self._roblox_api_lock:
                     fresh = await self.client.fetch_presence(to_refresh)
                 if not fresh:
@@ -152,7 +163,9 @@ class MonitorTasks:
                     )
                     return
                 presences = list(self._presence_cache.values())
-                oldest = int(checked_at - min(self._presence_checked_at.values()))
+                ages = {u: int(checked_at - t) for u, t in self._presence_checked_at.items()}
+                oldest = max((a for u, a in ages.items() if u not in low_priority), default=0)
+                oldest_low = max((a for u, a in ages.items() if u in low_priority), default=0)
                     
                 self.last_scan_status = "SUCCESS"
                 self.last_scan_time = int(time.time())
@@ -217,7 +230,7 @@ class MonitorTasks:
                 # How fresh the data behind that scan is, for the dashboard.
                 await db.execute(
                     'INSERT OR REPLACE INTO bot_status (key, value) VALUES (?, ?)',
-                    ('last_scan_coverage', f"{len(fresh)}/{len(user_ids)}/{oldest}"),
+                    ('last_scan_coverage', f"{len(fresh)}/{len(user_ids)}/{oldest}/{oldest_low}"),
                 )
                 await db.commit()
 
@@ -225,7 +238,7 @@ class MonitorTasks:
                 logger.info(
                     f"Presence scan complete in {duration:.1f}s. Online: {online_players}, In-game: {active_players} "
                     f"(Unassigned server: {null_game_id_count}). Refreshed {len(fresh)}/{len(user_ids)}; "
-                    f"oldest check {oldest}s ago."
+                    f"oldest check {oldest}s ago (low-priority groups: {oldest_low}s)."
                 )
                 
         except Exception as e:
