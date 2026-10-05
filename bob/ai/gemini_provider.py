@@ -78,6 +78,11 @@ class GeminiProvider(OpenAIProvider):
                     raise _DailyQuota(wait) from exc
                 raise
 
+        # With other models to fall back on, one retry is enough: when Google
+        # reports a model as overloaded, the next model answers sooner than
+        # this one recovers.
+        if config.GEMINI_FALLBACK_MODELS:
+            max_retries = min(max_retries, 1)
         return await super().request_with_retries(guarded, label, max_retries)
 
     async def chat(
