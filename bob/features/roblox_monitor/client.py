@@ -19,10 +19,13 @@ logger = logging.getLogger('discord')
 # A proxy that refuses requests (out of credit, bad login, unreachable) is
 # left alone for this long before being tried again.
 PROXY_COOLDOWN_SECONDS = 15 * 60
-# A proxy Roblox rate-limits is rested this long. Measured: a refused IP stays
-# refused for minutes and needs about four to get its full burst back, so
-# putting it back to work sooner just gets it refused again.
-PROXY_RATE_LIMIT_REST_SECONDS = 5 * 60
+# A proxy Roblox rate-limits is rested this long. Tried on the live host at
+# both 90 seconds and 5 minutes: free shared proxies get refused about as
+# often either way (other people use the same addresses), so the longer rest
+# only meant fewer proxies in use and staler data.
+PROXY_RATE_LIMIT_REST_SECONDS = 90
+# The host's own connection, used as one more address alongside the proxies.
+DIRECT = "direct"
 MAX_PROXY_SWITCHES_PER_BATCH = 3
 
 
@@ -37,10 +40,13 @@ class RobloxClient:
         self._presence_blocked_until = 0.0
         self._bad_proxies: dict[str, float] = {}
         self._next_proxy = 0
+        # With no proxies configured everything goes direct, as before.
+        self._routes = [*ROBLOX_PROXY_LIST, DIRECT] if ROBLOX_PROXY_LIST else []
 
     def _working_proxies(self) -> list[str]:
+        """Every address not cooling down: the proxies, plus the host's own connection."""
         now = time.monotonic()
-        return [p for p in ROBLOX_PROXY_LIST if self._bad_proxies.get(p, 0) <= now]
+        return [p for p in self._routes if self._bad_proxies.get(p, 0) <= now]
 
     def _pick_proxy(self) -> str | None:
         """
@@ -63,14 +69,15 @@ class RobloxClient:
         left — instead of failing the whole sync or scan.
         """
         session = await self.get_session()
-        for _ in range(len(ROBLOX_PROXY_LIST) + 1):
+        for _ in range(len(self._routes) + 1):
             proxy = self._pick_proxy()
             try:
-                async with session.request(method, url, proxy=proxy, **kwargs) as resp:
+                via = None if proxy == DIRECT else proxy
+                async with session.request(method, url, proxy=via, **kwargs) as resp:
                     data = await resp.json() if resp.status == 200 else None
                     return resp.status, resp.headers, data, proxy
             except (aiohttp.ClientHttpProxyError, aiohttp.ClientProxyConnectionError) as e:
-                if proxy is None:
+                if proxy in (None, DIRECT):
                     raise
                 self._bad_proxies[proxy] = time.monotonic() + PROXY_COOLDOWN_SECONDS
                 reason = (
