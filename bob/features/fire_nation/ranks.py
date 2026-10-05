@@ -107,6 +107,19 @@ def get_rank(member: discord.abc.User) -> str:
     return "none"
 
 
+def fire_nation_title(member: discord.abc.User) -> str | None:
+    """
+    The rank Bob addresses this person by: their highest role that is Captain /
+    Commander or above, or None when they hold none. "Royalty" only names the
+    tier, so a specific title held alongside it (Prince, Princess) wins.
+    """
+    titles = [r for r in getattr(member, "roles", []) if r.name.lower() in config.HR_TITLE_ROLE_NAMES]
+    if not titles:
+        return None
+    specific = [r for r in titles if r.name.lower() != config.ROYALTY_ROLE_NAME.lower()]
+    return max(specific or titles, key=lambda r: r.position).name
+
+
 def can_manage(member: discord.abc.User) -> bool:
     return get_rank(member) in ("owner", "second")
 

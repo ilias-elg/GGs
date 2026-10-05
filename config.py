@@ -90,6 +90,18 @@ ROYALTY_ROLE_NAME = "Royalty"
 FIRE_RED = 0xB91C1C
 FIRE_ORANGE = 0xF97316
 
+# Discord roles that make someone an HR of the Fire Nation itself — Captain /
+# Commander and everything above. Bob addresses these people by their rank.
+# Matched by name, so it works in any server that uses the same role names.
+HR_TITLE_ROLE_NAMES: frozenset[str] = frozenset(
+    name.strip().lower()
+    for name in (
+        _first_env("HR_TITLE_ROLE_NAMES")
+        or "Lead,Lord,Royalty,Prince,Princess,Advisor,General,Admiral,Captain,Commander"
+    ).split(",")
+    if name.strip()
+)
+
 OWNER_USER_IDS: frozenset[int] = _id_set("DISCORD_OWNER_USER_IDS")
 SECOND_IN_COMMAND_USER_IDS: frozenset[int] = _id_set("DISCORD_SECOND_IN_COMMAND_USER_IDS")
 HR_ROLE_IDS: frozenset[int] = _id_set("DISCORD_HR_ROLE_IDS")
