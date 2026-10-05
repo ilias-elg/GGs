@@ -237,7 +237,7 @@ async def build_dashboard_embed() -> discord.Embed:
             if stats["hidden_game"] > 0:
                 extras.append(f"{stats['hidden_game']} in a hidden game")
             if stats["unassigned"] > 0:
-                extras.append(f"{stats['unassigned']} playing, server hidden")
+                extras.append(f"{stats['unassigned']} unassigned server")
             return extras
 
         for group_id, group_name in MONITORED_GROUPS.items():
@@ -301,25 +301,28 @@ async def build_dashboard_embed() -> discord.Embed:
                     gid = user_best_group[uid]['gid']
                     group_tally[gid] = group_tally.get(gid, 0) + 1
                 breakdown = "  ·  ".join(
-                    f"{grpname.replace('TSB ', '')} {group_tally[gid]}"
+                    f"{grpname.replace('TSB ', '')}: {group_tally[gid]}"
                     for gid, grpname in MONITORED_GROUPS.items() if gid in group_tally
                 )
 
                 short_id = _short_server_id(job_id)
                 if public_jobs is not None and job_id in public_jobs:
                     line = (
-                        f"🔗  `{short_id}`  **{_plural(public_jobs[job_id], 'player')}**  ·  "
-                        f"{cnt} tracked  —  {breakdown}"
+                        f"🔗  **{_plural(public_jobs[job_id], 'player')}** in server `ID: {short_id}`\n"
+                        f"> 🛡️ **{_plural(cnt, 'group member')}:** {breakdown}"
                     )
                 else:
-                    line = f"🔗  `{short_id}`  **{cnt} tracked**  —  {breakdown}"
+                    line = (
+                        f"🔗  **{_plural(cnt, 'tracked member')}** in server `ID: {short_id}`\n"
+                        f"> 🛡️ **Breakdown:** {breakdown}"
+                    )
 
                 hrs = [
                     f"**{usernames.get(uid, uid)}** ({'/'.join(hr_groups[uid])})"
                     for uid in members if uid in hr_groups
                 ]
                 if hrs:
-                    line += f"\n> ⚠️ HR: {', '.join(hrs)}"
+                    line += f"\n> ⚠️ **HRs Present:** {', '.join(hrs)}"
 
                 if public_jobs is None:
                     unknown_server_lines.append(line)
@@ -333,19 +336,19 @@ async def build_dashboard_embed() -> discord.Embed:
                 current_len = 0
                 part = 1
                 for line in lines:
-                    if current_len + len(line) + 1 > 1000:
+                    if current_len + len(line) + 2 > 1000:
                         name = title if part == 1 else f"{title} (Part {part})"
-                        embed.add_field(name=name, value="\n".join(current_chunk), inline=False)
+                        embed.add_field(name=name, value="\n\n".join(current_chunk), inline=False)
                         current_chunk = [line]
                         current_len = len(line)
                         part += 1
                     else:
                         current_chunk.append(line)
-                        current_len += len(line) + 1
+                        current_len += len(line) + 2
 
                 if current_chunk:
                     name = title if part == 1 else f"{title} (Part {part})"
-                    embed.add_field(name=name, value="\n".join(current_chunk), inline=False)
+                    embed.add_field(name=name, value="\n\n".join(current_chunk), inline=False)
 
             if hidden:
                 more = (
