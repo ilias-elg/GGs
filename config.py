@@ -106,12 +106,13 @@ MERIT_CONCLUSION_CHANNEL_IDS: frozenset[int] = _id_set("MERIT_CONCLUSION_CHANNEL
 TEST_GUILD_ID: int = int(_first_env("DISCORD_TEST_GUILD_ID") or 0)
 
 # Models to fall back to, in order, when the chat model runs out of its
-# daily free-tier quota (each model has its own).
+# daily free-tier quota (each model has its own). 3.6 comes before 3.7
+# because it answers in about a second where 3.7 often takes ten or more.
 GEMINI_FALLBACK_MODELS: list[str] = [
     m.strip()
     for m in (
         _first_env("GEMINI_FALLBACK_MODELS")
-        or "gemini-3.7-flash,gemini-3.6-flash,gemini-flash-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+        or "gemini-3.6-flash,gemini-3.7-flash,gemini-flash-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
     ).split(",")
     if m.strip()
 ]

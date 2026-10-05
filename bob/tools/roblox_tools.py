@@ -167,9 +167,11 @@ ROBLOX_SCHEMAS: list[dict] = [
             "name": "send_dashboard",
             "description": (
                 "Send the full FIRE NATION LIVE INTELLIGENCE DASHBOARD as a rich Discord embed. "
-                "Use this whenever the user asks for the dashboard, live stats, an overview, "
-                "or a summary of all groups. Do NOT narrate the data as text — call this tool "
-                "to send the real formatted embed."
+                "Use this ONLY when the user's current message asks for the dashboard, live stats, an "
+                "overview, or a summary of all groups — never for a greeting, small talk, or a message "
+                "about something else, and never just because it was sent earlier in the conversation. "
+                "When it is asked for, do NOT narrate the data as text — call this tool to send the "
+                "real formatted embed."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },

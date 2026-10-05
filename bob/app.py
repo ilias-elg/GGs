@@ -124,12 +124,22 @@ def _is_addressed_to_bob(message: discord.Message) -> bool:
     return False
 
 
+# Just his name, with or without a greeting: "bob", "hey bob?", "yo bob!".
+_NAME_ONLY = re.compile(r"^\W*(?:(?:hey|hi|yo|hello|ok|okay|oi|ay)\W+)?bob\W*$", re.IGNORECASE)
+
+
 def _clean_content(message: discord.Message) -> str:
     """Remove @mention and 'hey bob' preamble from message content."""
     content = message.content
     if bot.user:
         content = content.replace(f"<@{bot.user.id}>", "").strip()
         content = content.replace(f"<@!{bot.user.id}>", "").strip()
+
+    # Calling his name is not a request. Answered directly instead of being
+    # sent to the AI, which is slow and, with nothing to go on, picks a tool
+    # to run on its own.
+    if _NAME_ONLY.match(content) and not message.attachments:
+        return ""
 
     lower = content.lower()
     for prefix in ("hey bob,", "hey bob", "bob,"):
