@@ -357,7 +357,15 @@ async def build_dashboard_embed() -> discord.Embed:
                 )
                 (unknown_server_lines or private_server_lines or public_server_lines).append(more)
 
-            if public_server_lines:
+            # The public section is always shown when the list is known, so an
+            # empty one reads as "nobody is in a public server", not as a fault.
+            if public_jobs is not None:
+                if not public_server_lines:
+                    public_server_lines.append("*No tracked members in a public server right now.*")
+                public_server_lines.append(
+                    f"> *{_plural(len(public_jobs), 'public server')} running  ·  "
+                    f"{_plural(sum(public_jobs.values()), 'player')} in total*"
+                )
                 add_chunked_fields("🖥️  Active Public Servers", public_server_lines)
             if private_server_lines:
                 add_chunked_fields("🔒  Active Private Servers", private_server_lines)
