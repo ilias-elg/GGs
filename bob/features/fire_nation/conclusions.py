@@ -35,6 +35,13 @@ _TITLE_NOISE = re.compile(r"<a?:\w+:\d+>|[#*_`『』]")
 _COHOST = r"co[\s-]?host"
 _EXAM_LABELS = rf"{_COHOST}|guards?|spectators?"
 _TRAINING_LABELS = rf"{_COHOST}|attendees?|spectators?"
+# Hosts also write the same thing as a sentence — "Thanks to @a @b for
+# spectating", "Shoutout to @c for guarding" — so the pings before these
+# phrases count exactly like the labelled line would.
+_SENTENCE_ROLES = {
+    _EXAM_LABELS: r"co[\s-]?hosting|hosting with (?:me|us)|guarding|spectating",
+    _TRAINING_LABELS: r"co[\s-]?hosting|hosting with (?:me|us)|spectating|coming|attending|participating",
+}
 # For /addmerit, which reads the same lines: activity → (labels, how to name them in a reply).
 COUNTED_LINES = {
     "exam": (_EXAM_LABELS, "**Co-host**, **Guards** and **Spectators**"),
@@ -94,7 +101,8 @@ def counted_text(content: str, labels: str) -> str:
     "Guards:"), one per line with its label. A section runs from its label to
     the next "Something:" label or blank line, so a long list can wrap over
     several lines — and it still works on text pasted into a slash command,
-    where the whole post arrives as a single line.
+    where the whole post arrives as a single line. Sentences such as
+    "Thanks to @a @b for spectating" are kept too, rewritten as a labelled line.
     """
     counted = re.compile(rf"\b(?:{labels})\b", re.IGNORECASE)
     found = list(_LABEL.finditer(content))
@@ -106,6 +114,19 @@ def counted_text(content: str, labels: str) -> str:
         end = found[index + 1].start() if index + 1 < len(found) else len(content)
         section = re.split(r"\n\s*\n", content[label.end():end], maxsplit=1)[0]
         kept.append(f"{name}: {' '.join(section.split())}")
+
+    roles = _SENTENCE_ROLES.get(labels)
+    if roles:
+        # The pings a sentence credits are the ones since the previous
+        # sentence ended, so this also works when the post is one long line.
+        previous_end = 0
+        for phrase in re.finditer(rf"\bfor\s+(?P<role>{roles})\b", content, re.IGNORECASE):
+            sentence = re.split(r"[.!?\n]", content[previous_end:phrase.start()])[-1]
+            previous_end = phrase.end()
+            pings = " ".join(f"<@{user_id}>" for user_id in _MENTION.findall(sentence))
+            if pings:
+                role = "Co-host" if "host" in phrase["role"].lower() else phrase["role"].capitalize()
+                kept.append(f"{role}: {pings}")
     return "\n".join(kept)
 
 
