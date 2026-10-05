@@ -285,8 +285,8 @@ async def build_dashboard_embed() -> discord.Embed:
         )
 
         # ── ACTIVE SERVERS (TARGET GAME ONLY) ────────────────────────────────
-        if servers:
-            public_jobs = await _get_public_job_ids()
+        public_jobs = await _get_public_job_ids()
+        if servers or public_jobs:
             ranked = sorted(servers.items(), key=lambda item: (-len(item[1]), item[0]))
             shown, hidden = ranked[:MAX_SERVERS_SHOWN], ranked[MAX_SERVERS_SHOWN:]
 
@@ -357,15 +357,31 @@ async def build_dashboard_embed() -> discord.Embed:
                 )
                 (unknown_server_lines or private_server_lines or public_server_lines).append(more)
 
-            # The public section is always shown when the list is known, so an
-            # empty one reads as "nobody is in a public server", not as a fault.
+            # Every public server is listed, with or without tracked members
+            # in it — the ones with tracked members first.
             if public_jobs is not None:
-                if not public_server_lines:
-                    public_server_lines.append("*No tracked members in a public server right now.*")
-                public_server_lines.append(
-                    f"> *{_plural(len(public_jobs), 'public server')} running  ·  "
-                    f"{_plural(sum(public_jobs.values()), 'player')} in total*"
+                others = sorted(
+                    ((job_id, playing) for job_id, playing in public_jobs.items() if job_id not in servers),
+                    key=lambda item: (-item[1], item[0]),
                 )
+                for job_id, playing in others[:MAX_SERVERS_SHOWN]:
+                    public_server_lines.append(
+                        f"🔗  **{_plural(playing, 'player')}** in server `ID: {_short_server_id(job_id)}`\n"
+                        f"> 🛡️ **No tracked members**"
+                    )
+                if len(others) > MAX_SERVERS_SHOWN:
+                    rest = others[MAX_SERVERS_SHOWN:]
+                    public_server_lines.append(
+                        f"*…and {_plural(len(rest), 'more public server')} with "
+                        f"{_plural(sum(playing for _, playing in rest), 'player')}*"
+                    )
+                if not public_server_lines:
+                    public_server_lines.append("*No public servers are running right now.*")
+                else:
+                    public_server_lines.append(
+                        f"> *{_plural(len(public_jobs), 'public server')} running  ·  "
+                        f"{_plural(sum(public_jobs.values()), 'player')} in total*"
+                    )
                 add_chunked_fields("🖥️  Active Public Servers", public_server_lines)
             if private_server_lines:
                 add_chunked_fields("🔒  Active Private Servers", private_server_lines)
