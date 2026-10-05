@@ -124,8 +124,11 @@ async def build_plan(message: discord.Message) -> Plan | None:
     cohost = None
     if merit_type in merit.COHOST_MERIT_TYPES:
         for line in content.splitlines():
-            ids = _MENTION.findall(line)
-            if ids and _COHOST_LINE.search(line):
+            # The co-host is the first person pinged after the word itself, so
+            # "thanks @a @b and co-host @c" picks c, not a.
+            label = _COHOST_LINE.search(line)
+            ids = _MENTION.findall(line[label.end():]) if label else []
+            if ids:
                 cohost = next((m for m in recipients if m.id == int(ids[0])), None)
                 break
         if cohost and cohost.id == host.id:
