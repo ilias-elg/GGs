@@ -290,6 +290,13 @@ async def get_recent_actions(limit: int, awarded_by_id: int | None = None) -> li
     ]
 
 
+async def proof_recorded(proof_url: str) -> bool:
+    """True when something was already recorded against this proof link."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        return await db.fetchval("SELECT EXISTS (SELECT 1 FROM merit_awards WHERE proof_url = $1)", proof_url)
+
+
 async def count_entries() -> int:
     pool = await get_pool()
     async with pool.acquire() as db:

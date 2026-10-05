@@ -18,7 +18,7 @@ from discord.ext import commands, tasks
 import config
 from voice.manager import get_voice_manager
 
-from . import diagnostics, greetings, knowledge, merit, presence, tts
+from . import conclusions, diagnostics, greetings, knowledge, merit, presence, tts
 from . import voice as voice_feature
 from .ranks import can_manage, get_rank, has_access, rank_at_least
 
@@ -216,6 +216,7 @@ class FireNationCog(commands.Cog):
 
     async def cog_load(self) -> None:
         self.prune_departed.start()
+        self.bot.add_dynamic_items(conclusions.ConclusionButton)
 
     async def cog_unload(self) -> None:
         self.prune_departed.cancel()
@@ -264,6 +265,7 @@ class FireNationCog(commands.Cog):
         # Includes bot/webhook posts — announcements followed from another
         # server arrive as webhook messages.
         await voice_feature.handle_announcement_message(self.voice_manager, message)
+        await conclusions.handle_message(self.bot, message)
 
     # ── /addmerit ────────────────────────────────────────────────────────────
 
