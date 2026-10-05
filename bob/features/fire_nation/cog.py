@@ -329,6 +329,15 @@ class FireNationCog(commands.Cog):
             # The host always receives the merit, tagged in the announcement or not.
             if all(m.id != host.id for m in recipients):
                 recipients.append(host)
+            # Only members of the home server earn merits; anyone else is left out.
+            in_home = [m for m in recipients if await merit.in_home_server(self.bot, m.id)]
+            outside = len(recipients) - len(in_home)
+            recipients = in_home
+            if cohost and all(m.id != cohost.id for m in recipients) and not await merit.in_home_server(self.bot, cohost.id):
+                cohost = None
+                outside += 1
+            if not recipients:
+                raise merit.MeritError("Nobody named in this award is in the military server.")
 
             amount = merit.fixed_merit_amount(merit_type)
             label = activity.capitalize()
@@ -340,6 +349,9 @@ class FireNationCog(commands.Cog):
             await merit.record_awards(guild.id, awards, proof, actor)
             await merit.audit_award(self.bot, awards, label, actor, proof, host=host, cohost=cohost)
 
+            outside_note = (
+                f"\n• **{outside}** left out — not in the military server." if outside else ""
+            )
             exam_note = ""
             if activity in conclusions.COUNTED_LINES:
                 exam_note = f"\n• Only the {conclusions.COUNTED_LINES[activity][1]} lines were counted."
@@ -356,7 +368,7 @@ class FireNationCog(commands.Cog):
                 f"Recorded **+{merit.fmt_amount(amount)}** {label} merit{merit.plural(amount)} for "
                 f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'} (Host: {host})"
                 f"{_skipped_note(len(mention_ids) - mentioned_count)} — logged for owners."
-                f"{cohost_note}{exam_note}\n• **Proof:** <{proof}>"
+                f"{outside_note}{cohost_note}{exam_note}\n• **Proof:** <{proof}>"
             ))
         except merit.MeritError as e:
             logger.warning(f"Merit award rejected for {actor.id}: {e}")

@@ -80,6 +80,7 @@ class Plan:
     cohost: discord.Member | None
     awards: list[tuple[discord.Member, float]]
     skipped: int
+    outside: int = 0
 
 
 def read_title(content: str) -> tuple[str, str, str | None, str] | None:
@@ -145,7 +146,7 @@ async def _member(guild: discord.Guild, user_id: int) -> discord.Member | None:
         return None
 
 
-async def build_plan(message: discord.Message) -> Plan | None:
+async def build_plan(bot: discord.Client, message: discord.Message) -> Plan | None:
     """Who gets what for this conclusion post, or None when it isn't one."""
     if message.guild is None or message.author.bot or not isinstance(message.author, discord.Member):
         return None
@@ -162,6 +163,10 @@ async def build_plan(message: discord.Message) -> Plan | None:
     # The host always receives the merit, pinged in their own post or not.
     if all(m.id != host.id for m in recipients):
         recipients.append(host)
+    # Only members of the home server earn merits; anyone else is left out.
+    in_home = [m for m in recipients if await merit.in_home_server(bot, m.id)]
+    outside = len(recipients) - len(in_home)
+    recipients = in_home
 
     cohost = None
     if merit_type in merit.COHOST_MERIT_TYPES:
@@ -180,7 +185,10 @@ async def build_plan(message: discord.Message) -> Plan | None:
     awards = [(m, amount) for m in recipients]
     if cohost:
         awards.append((cohost, merit.COHOST_BONUS_AMOUNT))
-    return Plan(merit_type, label, title_text, host, cohost, awards, len(mention_ids) - len([m for m in found if m]))
+    return Plan(
+        merit_type, label, title_text, host, cohost, awards,
+        len(mention_ids) - len([m for m in found if m]), outside,
+    )
 
 
 def _card(plan: Plan, message: discord.Message, heading: str, color: int) -> discord.Embed:
@@ -205,10 +213,13 @@ def _card(plan: Plan, message: discord.Message, heading: str, color: int) -> dis
     )
     for index, chunk in enumerate(merit._chunk_lines(lines)[:20]):
         embed.add_field(name="Recipients" if index == 0 else "​", value=chunk, inline=False)
+    notes = []
+    if plan.outside:
+        notes.append(f"{plan.outside} not in the military server")
     if plan.skipped:
-        embed.add_field(
-            name="Skipped", value=f"{plan.skipped} pinged user(s) are no longer in the server.", inline=False
-        )
+        notes.append(f"{plan.skipped} pinged user(s) no longer in this server")
+    if notes:
+        embed.add_field(name="Skipped", value=" · ".join(notes), inline=False)
     embed.add_field(name="Proof", value=f"[Open the message]({message.jump_url})", inline=True)
     return embed
 
@@ -253,7 +264,10 @@ class ConclusionButton(
             message = await channel.fetch_message(self.message_id) if channel else None
         except discord.HTTPException:
             message = None
-        plan = await build_plan(message) if message else None
+        plan = await build_plan(interaction.client, message) if message else None
+        if plan is not None and not plan.awards:
+            await self._close(interaction, "Nobody in this post is in the military server — nothing recorded.")
+            return
         if plan is None:
             await self._close(
                 interaction, "The conclusion post was deleted or is no longer a conclusion — nothing recorded."
@@ -287,8 +301,8 @@ async def handle_message(bot: discord.Client, message: discord.Message) -> None:
     """Posts an approval card for a conclusion written in a watched channel."""
     if message.channel.id not in config.MERIT_CONCLUSION_CHANNEL_IDS:
         return
-    plan = await build_plan(message)
-    if plan is None:
+    plan = await build_plan(bot, message)
+    if plan is None or not plan.awards:
         return
     channel = await merit._fetch_log_channel(bot)
     if channel is None:

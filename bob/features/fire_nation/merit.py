@@ -303,6 +303,26 @@ async def count_entries() -> int:
         return await db.fetchval("SELECT COUNT(*) FROM merit_awards")
 
 
+async def in_home_server(bot: discord.Client, user_id: int) -> bool:
+    """
+    Whether this user is in the home server (Fire Nation Military) — only its
+    members earn merits. True when that can't be checked, so an outage never
+    silently drops people from an award.
+    """
+    guild = bot.get_guild(config.MERIT_HOME_GUILD_ID)
+    if guild is None or guild.unavailable:
+        return True
+    if guild.get_member(user_id):
+        return True
+    try:
+        await guild.fetch_member(user_id)
+        return True
+    except discord.NotFound:
+        return False
+    except discord.HTTPException:
+        return True
+
+
 async def archive_members(member_ids: list[int]) -> None:
     """Moves every ledger row of these members into merit_awards_archive, taking them off the leaderboard."""
     ids = [str(i) for i in member_ids]
