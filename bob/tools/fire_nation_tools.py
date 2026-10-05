@@ -26,7 +26,7 @@ MERIT_SCHEMAS: list[dict] = [
                 "(Advisor+ only) with a required host — the person who receives the merit for running it — "
                 "plus any participant usernames. Exams and events (not raids) can also have a cohost, who gets an "
                 "extra 0.5 on top of their participant merit — list them in usernames too if they took part. "
-                "For an 'exam', usernames are the guards and co-host only: never include the people who "
+                "For an 'exam', usernames are the guards, spectators and co-host only: never include the people who "
                 "passed or took the exam, they earn no merit."
             ),
             "parameters": {

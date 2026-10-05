@@ -297,7 +297,7 @@ class FireNationCog(commands.Cog):
                     "`https://discord.com/channels/<guild_id>/<channel_id>/<message_id>`."
                 )
             # Merits are for running an exam, not for passing it: only the
-            # Co-host and Guards lines of the pasted post are counted.
+            # Co-host, Guards and Spectators lines of the pasted post are counted.
             if merit_type == "exam":
                 mention_ids = extract_mention_ids(conclusions.exam_counted_text(announcement))
             else:
@@ -335,7 +335,7 @@ class FireNationCog(commands.Cog):
 
             exam_note = ""
             if merit_type == "exam":
-                exam_note = "\n• Only the **Co-host** and **Guards** lines were counted — passing an exam earns no merit."
+                exam_note = "\n• Only the **Co-host**, **Guards** and **Spectators** lines were counted — passing an exam earns no merit."
                 if not mention_ids:
                     exam_note += " No pings were found on those lines, so only the host was credited."
             cohost_note = ""
@@ -355,9 +355,9 @@ class FireNationCog(commands.Cog):
             logger.warning(f"Merit award rejected for {actor.id}: {e}")
             await interaction.edit_original_response(content=f"Could not record the award: {e}")
 
-    @addmerit.command(name="exam", description="Award 1 merit to the host, co-host and guards. Paste the conclusion.")
+    @addmerit.command(name="exam", description="Award 1 merit to the host, co-host, guards and spectators. Paste the conclusion.")
     @app_commands.describe(
-        announcement="Paste the full exam conclusion — the Co-host and Guards lines are counted, not Passed.",
+        announcement="Paste the full exam conclusion — Co-host, Guards and Spectators are counted, not Passed.",
         proof="Discord message link as proof",
         host="The host who ran this exam — receives the merit.",
         cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",

@@ -33,21 +33,26 @@ _TITLE_NOISE = re.compile(r"<a?:\w+:\d+>|[#*_`『』]")
 # (keyword, merit type whose rules apply, name shown on the card, the labelled
 # lines whose pings earn the merit — None means every ping in the post)
 _COHOST = r"co[\s-]?host"
-_EXAM_LABELS = rf"{_COHOST}|guards?"
+_EXAM_LABELS = rf"{_COHOST}|guards?|spectators?"
 _TYPE_KEYWORDS = (
     ("raid", "raid", "Raid", None),
-    # Merits are for running an exam, not for passing it: the people on the
-    # "Passed:" line get nothing.
+    # Merits are for running or watching an exam, not for passing it: the
+    # people on the "Passed:" line get nothing.
     ("exam", "exam", "Exam", _EXAM_LABELS),
     ("induction", "exam", "Exam", _EXAM_LABELS),
     # A training is worth the same as an event. Its post also pings winners
     # and teams, which don't count.
-    ("training", "event", "Training", rf"{_COHOST}|attendees?"),
+    ("training", "event", "Training", rf"{_COHOST}|attendees?|spectators?"),
     ("event", "event", "Event", None),
 )
 # "Something:" anywhere in the text. The lookarounds keep timestamps (<t:1:R>),
 # emoji (<:name:1>, :name:) and links (https://) from counting as labels.
-_LABEL = re.compile(r"(?<![\w<:@/])([A-Za-z][A-Za-z -]{0,30}):(?!\d|//)")
+# A bold or underlined heading counts as a label with or without its colon
+# ("**Spectators**", "__FFA__").
+_LABEL = re.compile(
+    r"(?P<mark>\*\*|__)\s*(?P<bold>[A-Za-z][A-Za-z -]{0,30}?)\s*:?\s*(?P=mark):?"
+    r"|(?<![\w<:@/*])(?P<plain>[A-Za-z][A-Za-z -]{0,30}):(?!\d|//)"
+)
 
 # Two people pressing Approve at once must not both get past the duplicate check.
 _approval_lock = asyncio.Lock()
@@ -89,11 +94,12 @@ def counted_text(content: str, labels: str) -> str:
     found = list(_LABEL.finditer(content))
     kept = []
     for index, label in enumerate(found):
-        if not counted.search(label.group(1)):
+        name = label["bold"] or label["plain"]
+        if not counted.search(name):
             continue
         end = found[index + 1].start() if index + 1 < len(found) else len(content)
         section = re.split(r"\n\s*\n", content[label.end():end], maxsplit=1)[0]
-        kept.append(f"{label.group(1)}: {' '.join(section.split())}")
+        kept.append(f"{name}: {' '.join(section.split())}")
     return "\n".join(kept)
 
 
