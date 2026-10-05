@@ -30,17 +30,20 @@ _COHOST_LINE = re.compile(r"co[\s-]?host", re.IGNORECASE)
 _TITLE_NOISE = re.compile(r"<a?:\w+:\d+>|[#*_`『』]")
 # The title's wording varies with what was hosted ("Soldier Exam Concluded",
 # "Recruit Induction Concluded"), so the type comes from a keyword in it.
-# (keyword, merit type whose rules apply, name shown on the card, labelled lines only)
+# (keyword, merit type whose rules apply, name shown on the card, the labelled
+# lines whose pings earn the merit — None means every ping in the post)
+_COHOST = r"co[\s-]?host"
 _TYPE_KEYWORDS = (
-    ("raid", "raid", "Raid", False),
-    ("exam", "exam", "Exam", False),
-    ("induction", "exam", "Exam", False),
-    # A training is worth the same as an event. Its post also pings winners and
-    # teams, so only the "Co-host:" and "Attendees:" lines are counted.
-    ("training", "event", "Training", True),
-    ("event", "event", "Event", False),
+    ("raid", "raid", "Raid", None),
+    # Merits are for running an exam, not for passing it: the people on the
+    # "Passed:" line get nothing.
+    ("exam", "exam", "Exam", rf"{_COHOST}|guards?"),
+    ("induction", "exam", "Exam", rf"{_COHOST}|guards?"),
+    # A training is worth the same as an event. Its post also pings winners
+    # and teams, which don't count.
+    ("training", "event", "Training", rf"{_COHOST}|attendees?"),
+    ("event", "event", "Event", None),
 )
-_COUNTED_LABEL = re.compile(r"^[\s*_>#-]*(?:co[\s-]?host|attendees?)\b[^:\n]*:", re.IGNORECASE)
 _ANY_LABEL = re.compile(r"^[\s*_>#-]*[A-Za-z][\w -]{0,30}:")
 
 # Two people pressing Approve at once must not both get past the duplicate check.
@@ -58,28 +61,30 @@ class Plan:
     skipped: int
 
 
-def read_title(content: str) -> tuple[str, str, bool, str] | None:
-    """(merit type, card label, labelled lines only, cleaned title) when the post opens with a recognised "... Concluded" line."""
+def read_title(content: str) -> tuple[str, str, str | None, str] | None:
+    """(merit type, card label, counted labels, cleaned title) when the post opens with a recognised "... Concluded" line."""
     for line in [l for l in content.splitlines() if l.strip()][:3]:
         lowered = line.lower()
         if "concluded" not in lowered:
             continue
-        for keyword, merit_type, label, labelled_only in _TYPE_KEYWORDS:
+        for keyword, merit_type, label, counted in _TYPE_KEYWORDS:
             if keyword in lowered:
-                return merit_type, label, labelled_only, " ".join(_TITLE_NOISE.sub("", line).split())
+                return merit_type, label, counted, " ".join(_TITLE_NOISE.sub("", line).split())
         return None
     return None
 
 
-def counted_text(content: str) -> str:
+def counted_text(content: str, labels: str) -> str:
     """
-    Only the "Co-host:" and "Attendees:" sections of a post. A section runs
+    Only the sections of a post whose label matches (e.g. "Co-host:" and
+    "Attendees:"). A section runs
     from its label to the next blank line or the next "Something:" label, so a
     long attendee list can wrap over several lines.
     """
+    counted_label = re.compile(rf"^[\s*_>#-]*(?:{labels})\b[^:\n]*:", re.IGNORECASE)
     kept, inside = [], False
     for line in content.splitlines():
-        if _COUNTED_LABEL.match(line):
+        if counted_label.match(line):
             inside = True
         elif not line.strip() or _ANY_LABEL.match(line):
             inside = False
@@ -105,9 +110,9 @@ async def build_plan(message: discord.Message) -> Plan | None:
     title = read_title(message.content)
     if not title:
         return None
-    merit_type, label, labelled_only, title_text = title
+    merit_type, label, counted, title_text = title
     host = message.author
-    content = counted_text(message.content) if labelled_only else message.content
+    content = counted_text(message.content, counted) if counted else message.content
 
     mention_ids = list(dict.fromkeys(int(i) for i in _MENTION.findall(content)))
     found = [await _member(message.guild, user_id) for user_id in mention_ids]
