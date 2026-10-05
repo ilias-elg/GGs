@@ -34,6 +34,12 @@ _TITLE_NOISE = re.compile(r"<a?:\w+:\d+>|[#*_`『』]")
 # lines whose pings earn the merit — None means every ping in the post)
 _COHOST = r"co[\s-]?host"
 _EXAM_LABELS = rf"{_COHOST}|guards?|spectators?"
+_TRAINING_LABELS = rf"{_COHOST}|attendees?|spectators?"
+# For /addmerit, which reads the same lines: activity → (labels, how to name them in a reply).
+COUNTED_LINES = {
+    "exam": (_EXAM_LABELS, "**Co-host**, **Guards** and **Spectators**"),
+    "training": (_TRAINING_LABELS, "**Co-host**, **Attendees** and **Spectators**"),
+}
 _TYPE_KEYWORDS = (
     ("raid", "raid", "Raid", None),
     # Merits are for running or watching an exam, not for passing it: the
@@ -42,7 +48,7 @@ _TYPE_KEYWORDS = (
     ("induction", "exam", "Exam", _EXAM_LABELS),
     # A training is worth the same as an event. Its post also pings winners
     # and teams, which don't count.
-    ("training", "event", "Training", rf"{_COHOST}|attendees?|spectators?"),
+    ("training", "event", "Training", _TRAINING_LABELS),
     ("event", "event", "Event", None),
 )
 # "Something:" anywhere in the text. The lookarounds keep timestamps (<t:1:R>),
@@ -103,9 +109,9 @@ def counted_text(content: str, labels: str) -> str:
     return "\n".join(kept)
 
 
-def exam_counted_text(content: str) -> str:
-    """The part of an exam post whose pings earn the merit — for /addmerit exam."""
-    return counted_text(content, _EXAM_LABELS)
+def counted_text_for(activity: str, content: str) -> str:
+    """The part of an exam or training post whose pings earn the merit — for /addmerit."""
+    return counted_text(content, COUNTED_LINES[activity][0])
 
 
 async def _member(guild: discord.Guild, user_id: int) -> discord.Member | None:

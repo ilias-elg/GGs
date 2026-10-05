@@ -281,8 +281,15 @@ class FireNationCog(commands.Cog):
         proof: str,
         host: discord.Member,
         cohost: discord.Member | None,
+        activity: str | None = None,
     ) -> None:
-        """exam / event / raid — every @mention in the announcement plus the host; co-hosts (exam/event) get +0.5."""
+        """
+        exam / event / raid — the host plus everyone pinged in the announcement;
+        co-hosts (exam/event) get +0.5. `activity` names what was actually run
+        when it differs from the merit type: a training is recorded with the
+        event rules.
+        """
+        activity = activity or merit_type
         await interaction.response.defer(ephemeral=True)
         guild, actor = interaction.guild, interaction.user
         try:
@@ -296,10 +303,10 @@ class FireNationCog(commands.Cog):
                     "(right-click the conclusion message → Copy Message Link). It looks like "
                     "`https://discord.com/channels/<guild_id>/<channel_id>/<message_id>`."
                 )
-            # Merits are for running an exam, not for passing it: only the
-            # Co-host, Guards and Spectators lines of the pasted post are counted.
-            if merit_type == "exam":
-                mention_ids = extract_mention_ids(conclusions.exam_counted_text(announcement))
+            # Exams and trainings only count certain lines of the pasted post:
+            # passing an exam or winning a training round earns nothing.
+            if activity in conclusions.COUNTED_LINES:
+                mention_ids = extract_mention_ids(conclusions.counted_text_for(activity, announcement))
             else:
                 mention_ids = extract_mention_ids(announcement)
                 if not mention_ids:
@@ -324,7 +331,7 @@ class FireNationCog(commands.Cog):
                 recipients.append(host)
 
             amount = merit.fixed_merit_amount(merit_type)
-            label = merit_type.capitalize()
+            label = activity.capitalize()
             awards = [(m, amount) for m in recipients]
             # The co-host bonus is extra: it stacks with the participant merit
             # they get from being pinged in the announcement.
@@ -334,8 +341,8 @@ class FireNationCog(commands.Cog):
             await merit.audit_award(self.bot, awards, label, actor, proof, host=host, cohost=cohost)
 
             exam_note = ""
-            if merit_type == "exam":
-                exam_note = "\n• Only the **Co-host**, **Guards** and **Spectators** lines were counted — passing an exam earns no merit."
+            if activity in conclusions.COUNTED_LINES:
+                exam_note = f"\n• Only the {conclusions.COUNTED_LINES[activity][1]} lines were counted."
                 if not mention_ids:
                     exam_note += " No pings were found on those lines, so only the host was credited."
             cohost_note = ""
@@ -372,6 +379,22 @@ class FireNationCog(commands.Cog):
         host: discord.Member, cohost: discord.Member | None = None,
     ) -> None:
         await self._award_activity(interaction, "exam", announcement, proof, host, cohost)
+
+    @addmerit.command(
+        name="training", description="Award 1 merit to the host, co-host, attendees and spectators. Paste the conclusion."
+    )
+    @app_commands.describe(
+        announcement="Paste the full training conclusion — Co-host, Attendees and Spectators are counted.",
+        proof="Discord message link as proof",
+        host="The host who ran this training — receives the merit.",
+        cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",
+    )
+    @app_commands.rename(host="hosted_by", cohost="cohosted_by", proof="proof_link")
+    async def addmerit_training(
+        self, interaction: discord.Interaction, announcement: str, proof: str,
+        host: discord.Member, cohost: discord.Member | None = None,
+    ) -> None:
+        await self._award_activity(interaction, "event", announcement, proof, host, cohost, activity="training")
 
     @addmerit.command(name="event", description="Award 1 merit to all participants. Paste the conclusion announcement.")
     @app_commands.describe(
