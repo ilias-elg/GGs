@@ -640,6 +640,41 @@ class FireNationCog(commands.Cog):
             ephemeral=True,
         )
 
+    # ── /access ──────────────────────────────────────────────────────────────
+
+    access = app_commands.Group(
+        name="access", description="Who Bob talks to. Owner and Fire Lord only.", guild_only=True
+    )
+
+    async def _change_access(self, interaction: discord.Interaction, user: discord.Member, grant: bool) -> None:
+        # Imported here: the tools package imports this feature, so a top-level import would be circular.
+        from bob.tools.fire_nation_tools import change_access
+        result = change_access(interaction.user, user, grant)
+        await interaction.response.send_message(result.get("result") or result["error"], ephemeral=True)
+
+    @access.command(name="add", description="Let someone talk to Bob.")
+    @app_commands.describe(user="The member Bob should talk to.")
+    async def access_add(self, interaction: discord.Interaction, user: discord.Member) -> None:
+        await self._change_access(interaction, user, True)
+
+    @access.command(name="remove", description="Stop Bob talking to someone.")
+    @app_commands.describe(user="The member Bob should stop responding to.")
+    async def access_remove(self, interaction: discord.Interaction, user: discord.Member) -> None:
+        await self._change_access(interaction, user, False)
+
+    @access.command(name="list", description="Show everyone on Bob's access list.")
+    async def access_list(self, interaction: discord.Interaction) -> None:
+        from bob.tools.fire_nation_tools import access_list_text
+        if not can_manage(interaction.user):
+            await interaction.response.send_message(
+                "Only the Owner or Fire Lord can see the access list.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            access_list_text(interaction.guild), ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
     # ── /diagnostics ─────────────────────────────────────────────────────────
 
     @app_commands.command(

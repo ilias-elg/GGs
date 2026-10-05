@@ -34,9 +34,9 @@ RANK_LABELS: dict[str, str] = {
 }
 
 # ─── Standing-access grants ───────────────────────────────────────────────────
-# One Discord user ID per line in data/bot-access.txt (edit the file, then
-# restart). These people can control Bob's voice and put him to sleep, like
-# the Owner and Fire Lord can.
+# One Discord user ID per line in data/bot-access.txt, changed with /access or
+# by telling Bob in chat. These people can talk to Bob, control his voice and
+# put him to sleep, like the Owner and Fire Lord can.
 
 ACCESS_FILE_PATH = os.path.join(config.DATA_DIR, "bot-access.txt")
 _LEGACY_ACCESS_FILE_PATH = os.path.join(config.DATA_DIR, "jarvis-access.txt")
@@ -54,6 +54,38 @@ def load_access() -> set[int]:
             continue
     logger.info(f"Standing-access list loaded ({len(access_ids)} users)")
     return access_ids
+
+
+def _save_access() -> None:
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    with open(ACCESS_FILE_PATH, "w", encoding="utf-8") as f:
+        f.writelines(f"{user_id}\n" for user_id in sorted(access_ids))
+
+
+def grant_access(user_id: int) -> bool:
+    """Adds someone to the list. False when they were already on it. Raises OSError if it can't be saved."""
+    if user_id in access_ids:
+        return False
+    access_ids.add(user_id)
+    try:
+        _save_access()
+    except OSError:
+        access_ids.discard(user_id)
+        raise
+    return True
+
+
+def revoke_access(user_id: int) -> bool:
+    """Takes someone off the list. False when they weren't on it. Raises OSError if it can't be saved."""
+    if user_id not in access_ids:
+        return False
+    access_ids.discard(user_id)
+    try:
+        _save_access()
+    except OSError:
+        access_ids.add(user_id)
+        raise
+    return True
 
 
 # ─── Rank helpers ─────────────────────────────────────────────────────────────

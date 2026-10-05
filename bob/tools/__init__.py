@@ -22,6 +22,7 @@ from .filesystem_tools import FILE_SCHEMAS, FILE_TOOL_NAMES, execute_filesystem_
 from .fire_nation_tools import (
     MERIT_SCHEMAS,
     ORDER_SCHEMAS,
+    ACCESS_SCHEMAS,
     FIRE_NATION_TOOL_NAMES,
     get_fire_nation_schemas,
     execute_fire_nation_tool,
@@ -198,7 +199,7 @@ def get_all_schemas(in_guild: bool = True) -> list[dict]:
         schemas.append(LOCAL_TASK_SCHEMA)
         schemas.extend(FILE_SCHEMAS)
     if in_guild:
-        schemas += list(DISCORD_SCHEMAS) + list(MERIT_SCHEMAS) + list(ORDER_SCHEMAS)
+        schemas += list(DISCORD_SCHEMAS) + list(MERIT_SCHEMAS) + list(ORDER_SCHEMAS) + list(ACCESS_SCHEMAS)
     return schemas
 
 

@@ -12,6 +12,7 @@ import asyncpg
 import discord
 
 from bob.features.fire_nation import merit, orders
+from bob.features.fire_nation import ranks
 from bob.features.fire_nation.ranks import RANK_ORDER, get_rank
 
 MERIT_SCHEMAS: list[dict] = [
@@ -190,8 +191,50 @@ ORDER_SCHEMAS: list[dict] = [
     },
 ]
 
+ACCESS_SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "grant_chat_access",
+            "description": (
+                "Adds a member to your access list, so you will hold conversations with them (and they can use "
+                "your voice). Use when the Owner or Fire Lord says to talk to, listen to or answer someone. "
+                "Without this call the change is NOT made."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"username": {"type": "string", "description": "Username, display name, mention or ID."}},
+                "required": ["username"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "revoke_chat_access",
+            "description": (
+                "Takes a member off your access list, so you stop responding to them. Use when the Owner or "
+                "Fire Lord says to stop talking to or ignore someone."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"username": {"type": "string", "description": "Username, display name, mention or ID."}},
+                "required": ["username"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_chat_access",
+            "description": "Lists everyone on your access list — the people you talk to besides the Owner and Fire Lord.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
 FIRE_NATION_TOOL_NAMES = frozenset(
-    s["function"]["name"] for s in MERIT_SCHEMAS + ORDER_SCHEMAS
+    s["function"]["name"] for s in MERIT_SCHEMAS + ORDER_SCHEMAS + ACCESS_SCHEMAS
 )
 
 # ─── Tool selection ───────────────────────────────────────────────────────────
@@ -204,8 +247,14 @@ _MERIT_INTENT = re.compile(
     re.IGNORECASE,
 )
 # Standing orders change Bob's behaviour for everyone, so only the Owner and
-# Fire Lord are ever offered the tools that change them.
+# Fire Lord are ever offered the tools that change them. The same goes for
+# deciding who Bob talks to.
 _ORDER_MIN_RANK = RANK_ORDER["second"]
+_ACCESS_INTENT = re.compile(
+    r"\b(access|talk(ing)? (to|with)|speak(ing)? (to|with)|listen(ing)? to|respond(ing)? to|repl(y|ying) to"
+    r"|answer(ing)?|ignor(e|ing)|allow(ed)?|whitelist)\b",
+    re.IGNORECASE,
+)
 
 
 def get_fire_nation_schemas(text: str, member, offer_all: bool = False) -> list[dict]:
@@ -217,6 +266,8 @@ def get_fire_nation_schemas(text: str, member, offer_all: bool = False) -> list[
         offer_all or orders.ORDER_INTENT.search(text) or orders.ORDER_LIST_INTENT.search(text)
     ):
         schemas += ORDER_SCHEMAS
+    if rank >= _ORDER_MIN_RANK and (offer_all or _ACCESS_INTENT.search(text)):
+        schemas += ACCESS_SCHEMAS
     return schemas
 
 
@@ -448,12 +499,51 @@ def _order_change(actor_rank: str, change) -> dict:
     return {"success": True, "result": text} if ok else {"error": text}
 
 
+def access_list_text(guild: discord.Guild) -> str:
+    if not ranks.access_ids:
+        return "Nobody is on the access list — I only talk to the Owner and Fire Lord."
+    lines = "\n".join(
+        f"• <@{user_id}>" + (f" ({member})" if (member := guild.get_member(user_id)) else "")
+        for user_id in sorted(ranks.access_ids)
+    )
+    return f"On the access list ({len(ranks.access_ids)}):\n{lines}"
+
+
+def change_access(actor: discord.abc.User, target: discord.Member, grant: bool) -> dict:
+    """Shared by the chat tools and /access. Returns {"success", "result"} or {"error"}."""
+    if not ranks.can_manage(actor):
+        return {"error": "Only the Owner or Fire Lord can change who I talk to."}
+    if target.bot:
+        return {"error": "Bots can't be put on the access list."}
+    if ranks.can_manage(target):
+        return {"error": f"{target} is the Owner or Fire Lord — they always have access."}
+    try:
+        changed = ranks.grant_access(target.id) if grant else ranks.revoke_access(target.id)
+    except OSError as e:
+        return {"error": f"I couldn't save the access list ({e}). Nothing changed."}
+    if grant:
+        text = f"{target} is now on the access list — I'll talk to them." if changed else f"{target} already has access."
+    else:
+        text = f"{target} is off the access list — I'll stop responding to them." if changed else f"{target} wasn't on the access list."
+    return {"success": True, "result": text}
+
+
 async def execute_fire_nation_tool(name: str, args: dict, ctx: dict) -> dict:
     """Returns {"success": True, "result": text}, or {"error": reason} when nothing was done."""
     message: discord.Message = ctx["message"]
     if not message.guild:
         return {"error": "That only works inside a server."}
     actor_rank = get_rank(message.author)
+
+    if name == "list_chat_access":
+        if not ranks.can_manage(message.author):
+            return {"error": "Only the Owner or Fire Lord can see the access list."}
+        return {"success": True, "result": access_list_text(message.guild)}
+    if name in ("grant_chat_access", "revoke_chat_access"):
+        target = find_member(message.guild, str(args.get("username", "")))
+        if isinstance(target, str):
+            return {"error": f"Nothing was changed. {target}"}
+        return change_access(message.author, target, name == "grant_chat_access")
 
     if name == "list_standing_orders":
         return {"success": True, "result": orders.format_order_list()}
