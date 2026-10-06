@@ -9,7 +9,7 @@ handlers here only parse options, call those, and format the reply.
 import io
 import logging
 import re
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import discord
 from discord import app_commands
@@ -719,6 +719,58 @@ class FireNationCog(commands.Cog):
             access_list_text(interaction.guild), ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    # ── /cleanup ─────────────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="cleanup", description="Delete Bob's own recent messages in a channel. Owner and Fire Lord only."
+    )
+    @app_commands.guild_only()
+    @app_commands.describe(
+        minutes="How far back to go. Default: 10.",
+        channel="Where to clean up. Default: this channel.",
+    )
+    async def cleanup(
+        self, interaction: discord.Interaction,
+        minutes: app_commands.Range[int, 1, 120] = 10,
+        channel: discord.TextChannel | None = None,
+    ) -> None:
+        if not can_manage(interaction.user):
+            await interaction.response.send_message(
+                "Access Denied — only the Owner or Fire Lord can clean up my messages.", ephemeral=True
+            )
+            return
+        target = channel or interaction.channel
+        await interaction.response.defer(ephemeral=True)
+        since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        deleted = failed = 0
+        try:
+            # Only his own messages, one at a time: a bot may always delete
+            # those, whereas bulk deletion needs Manage Messages.
+            async for message in target.history(after=since, limit=None):
+                if message.author.id != self.bot.user.id:
+                    continue
+                try:
+                    await message.delete()
+                    deleted += 1
+                except discord.HTTPException:
+                    failed += 1
+        except discord.Forbidden:
+            await interaction.edit_original_response(
+                content=f"I can't read the message history in {target.mention}, so I can't find my messages there."
+            )
+            return
+        logger.info(f"/cleanup by {interaction.user.id}: deleted {deleted} of my messages in {target.id} ({minutes} min)")
+        where = "" if target.id == interaction.channel_id else f" in {target.mention}"
+        if not deleted and not failed:
+            reply = f"I haven't posted anything{where} in the last {minutes} minute{'' if minutes == 1 else 's'}."
+        else:
+            reply = (
+                f"Deleted **{deleted}** of my message{'' if deleted == 1 else 's'}{where} "
+                f"from the last {minutes} minute{'' if minutes == 1 else 's'}."
+                + (f" {failed} could not be deleted." if failed else "")
+            )
+        await interaction.edit_original_response(content=reply)
 
     # ── /diagnostics ─────────────────────────────────────────────────────────
 
