@@ -745,6 +745,22 @@ class FireNationCog(commands.Cog):
             pass
         return deleted, failed
 
+    def _find_channel(self, guild: discord.Guild, text: str):
+        """
+        A channel in any server Bob is in, from a #mention, an ID, or a link to
+        the channel or to a message in it. Typed as text rather than picked
+        from Discord's list, because that list only offers the current server.
+        """
+        text = text.strip()
+        link = re.search(r"channels/\d+/(\d+)", text)
+        mention = re.fullmatch(r"<#(\d+)>", text)
+        channel_id = link.group(1) if link else mention.group(1) if mention else text if text.isdigit() else None
+        if channel_id:
+            found = self.bot.get_channel(int(channel_id))
+        else:
+            found = discord.utils.get(guild.text_channels, name=text.lstrip("#").lower())
+        return found if hasattr(found, "history") and getattr(found, "guild", None) else None
+
     async def _cleanup_server_choices(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
@@ -761,14 +777,14 @@ class FireNationCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(
         minutes="How far back to go. Default: 10.",
-        channel="One channel in this server. Default: this channel.",
+        channel="A channel in ANY server: #mention, channel ID, or a message link. Default: this channel.",
         server="Clean every channel of another server (or all servers) from here.",
     )
     @app_commands.autocomplete(server=_cleanup_server_choices)
     async def cleanup(
         self, interaction: discord.Interaction,
         minutes: app_commands.Range[int, 1, 120] = 10,
-        channel: discord.TextChannel | None = None,
+        channel: str | None = None,
         server: str | None = None,
     ) -> None:
         if not can_manage(interaction.user):
@@ -816,9 +832,18 @@ class FireNationCog(commands.Cog):
             )
             return
 
-        target = channel or interaction.channel
+        target = interaction.channel
+        if channel:
+            target = self._find_channel(interaction.guild, channel)
+            if target is None:
+                await interaction.response.send_message(
+                    "I couldn't find that channel in any server I'm in. Use a #mention, the channel's ID, "
+                    "or a link to a message in it.",
+                    ephemeral=True,
+                )
+                return
         await interaction.response.defer(ephemeral=True)
-        perms = target.permissions_for(interaction.guild.me)
+        perms = target.permissions_for(target.guild.me)
         if not (perms.view_channel and perms.read_message_history):
             await interaction.edit_original_response(
                 content=f"I can't read the message history in {target.mention}, so I can't find my messages there."
@@ -827,6 +852,8 @@ class FireNationCog(commands.Cog):
         deleted, failed = await self._delete_own_messages(target, since)
         logger.info(f"/cleanup by {interaction.user.id}: deleted {deleted} of my messages in {target.id} ({minutes} min)")
         where = "" if target.id == interaction.channel_id else f" in {target.mention}"
+        if target.guild.id != interaction.guild_id:
+            where += f" ({discord.utils.escape_markdown(target.guild.name)})"
         if not deleted and not failed:
             reply = f"I haven't posted anything{where} in {span}."
         else:
