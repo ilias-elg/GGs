@@ -18,6 +18,7 @@ Key improvements over the original:
 """
 
 import json
+import time
 import asyncio
 import logging
 from collections import defaultdict
@@ -66,6 +67,12 @@ def _get_bg_provider() -> AIProvider:
             from bob.ai import create_provider
             _bg_provider = create_provider()
             _bg_provider.model = config.get_background_model()
+            # Background work stays on the lite models: falling back onto a
+            # chat model would spend the requests the next reply needs.
+            if hasattr(_bg_provider, "fallbacks"):
+                _bg_provider.fallbacks = [
+                    m for m in _bg_provider.fallbacks if "lite" in m and m != _bg_provider.model
+                ]
         except Exception:
             # If background provider fails, fall back to None (caller will skip)
             pass
@@ -124,6 +131,10 @@ async def _extract_memories(
         logger.debug(f"Memory extraction skipped: {e}")
 
 
+SUMMARY_INTERVAL_SECONDS = 10 * 60
+_last_summary: dict[int, float] = {}
+
+
 async def _maybe_summarise(ai: AIProvider, channel_id: int) -> None:
     """
     If channel history is near the cap, generate a compressed summary
@@ -132,6 +143,12 @@ async def _maybe_summarise(ai: AIProvider, channel_id: int) -> None:
     history = mem.get_history(channel_id)
     if len(history) < 18:
         return
+    # A busy channel is always over the cap, so without this every single
+    # reply cost an extra AI request to re-summarise almost the same text.
+    now = time.monotonic()
+    if now - _last_summary.get(channel_id, -SUMMARY_INTERVAL_SECONDS) < SUMMARY_INTERVAL_SECONDS:
+        return
+    _last_summary[channel_id] = now
 
     bg = _get_bg_provider() or ai
     text = "\n".join(
@@ -406,7 +423,8 @@ class ConversationManager:
 
                 # ── Background tasks (non-blocking) ─────────────────────────
                 snippet = f"{username}: {content}\nBob: {answer}"
-                if config.MEMORY_ENABLED:
+                # A one-liner has nothing in it worth an AI request to remember.
+                if config.MEMORY_ENABLED and len(content) >= 25:
                     asyncio.create_task(
                         _extract_memories(self.ai, user_id, username, guild_id, snippet)
                     )

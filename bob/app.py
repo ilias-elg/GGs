@@ -10,9 +10,9 @@ list (see features/fire_nation/ranks.py) — to:
 No hardcoded channel IDs. Bot works server-wide.
 """
 
-import asyncio
 import logging
 import re
+from logging.handlers import RotatingFileHandler
 import discord
 from discord.ext import commands
 
@@ -32,9 +32,13 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("bot.log", encoding="utf-8")
+        # The host has 512 MB of disk: keep at most 3 MB of log.
+        RotatingFileHandler("bot.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8"),
     ]
 )
+# One line per AI request adds nothing the provider's own logging doesn't say.
+for noisy in ("httpx", "httpx2", "httpcore"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 logger = logging.getLogger("discord")
 
 # ── Discord intents ───────────────────────────────────────────────────────────

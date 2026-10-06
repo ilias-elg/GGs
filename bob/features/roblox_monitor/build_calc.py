@@ -1,4 +1,3 @@
-import math
 
 def calculate_stats(strength: int) -> dict:
     def get_fireball_dmg(str_val):

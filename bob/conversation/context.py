@@ -257,7 +257,7 @@ async def build_context(message: discord.Message, content: str, ai_provider=None
     if in_guild and message.guild:
         server_memories = await mem.get_server_memories(message.guild.id, query_text=content)
         if server_memories:
-            system += f"\n\n## Server Memory\n" + "\n".join(f"- {m}" for m in server_memories)
+            system += "\n\n## Server Memory\n" + "\n".join(f"- {m}" for m in server_memories)
 
     # Channel summary
     channel_summary = await mem.get_channel_summary(channel_id)

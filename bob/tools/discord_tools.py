@@ -12,10 +12,8 @@ These replace the old execute_discord_python "god mode" tool entirely.
 All Discord objects are resolved by name OR ID for natural-language friendliness.
 """
 
-import asyncio
 import logging
-from datetime import timedelta, timezone, datetime
-from typing import Optional
+from datetime import timedelta
 
 import discord
 from discord.ext import commands
@@ -1320,7 +1318,6 @@ async def _delete_message(
 
     try:
         msg = await ch.fetch_message(int(args["message_id"]))
-        reason = args.get("reason") or f"Deleted by {author.display_name} via Bob"
         await msg.delete()
         return {"success": True, "result": f"Deleted message {args['message_id']} from #{ch.name}"}
     except discord.NotFound:

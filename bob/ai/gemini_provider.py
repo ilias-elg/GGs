@@ -3,7 +3,7 @@ import logging
 import re
 import time
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 
 import config
 from .base import AIResponse
@@ -33,6 +33,13 @@ class AIQuotaExhausted(Exception):
         super().__init__(self.user_message)
 
 
+class AIBusy(Exception):
+    """Every model was busy or slow just now. `user_message` is safe to show in chat."""
+
+    status_code = 503
+    user_message = "Google's AI is overloaded right now and none of my models answered. Try again in a minute."
+
+
 class _DailyQuota(Exception):
     """A 429 for a per-day quota: waiting a few seconds and retrying cannot help."""
 
@@ -53,22 +60,39 @@ def _daily_quota_wait(exc: Exception) -> float | None:
     return None
 
 
+# How long one model gets to answer before the next one is tried. Measured on
+# the free tier: a healthy model answers in 1-5 seconds, an overloaded one can
+# sit for half a minute.
+REQUEST_TIMEOUT_SECONDS = 20.0
+# How long a model is left alone after it was overloaded or timed out.
+BUSY_COOLDOWN_SECONDS = 30.0
+
+
+def _short_wait(exc: Exception) -> float:
+    """Seconds a per-minute 429 asks us to wait, capped — the next model is used meanwhile."""
+    delay = re.search(r"retryDelay['\"]?: ?['\"]?(\d+(?:\.\d+)?)s", str(exc))
+    return min(max(float(delay.group(1)), 5.0), 60.0) if delay else BUSY_COOLDOWN_SECONDS
+
+
 class GeminiProvider(OpenAIProvider):
     def __init__(self) -> None:
         self.client = AsyncOpenAI(
             base_url=_GEMINI_BASE_URL,
             api_key=config.GOOGLE_API_KEY,
             max_retries=0,
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
         self.model = config.get_model()
+        # Tried in order after self.model. Background work narrows this to
+        # the lite models so it never spends the chat models' quota.
+        self.fallbacks: list[str] = list(config.GEMINI_FALLBACK_MODELS)
         logger.info(
             f"GeminiProvider initialized with model: {self.model} "
-            f"(fallbacks: {', '.join(config.GEMINI_FALLBACK_MODELS) or 'none'})"
+            f"(fallbacks: {', '.join(self.fallbacks) or 'none'})"
         )
 
     async def request_with_retries(self, operation, label="AI request", max_retries=3):
-        # Short per-minute limits and 5xx errors are worth the usual backoff;
-        # a spent daily quota is not, so it is surfaced straight away.
+        # A spent daily quota can't be waited out, so it is surfaced at once.
         async def guarded():
             try:
                 return await operation()
@@ -78,11 +102,11 @@ class GeminiProvider(OpenAIProvider):
                     raise _DailyQuota(wait) from exc
                 raise
 
-        # With other models to fall back on, one retry is enough: when Google
-        # reports a model as overloaded, the next model answers sooner than
-        # this one recovers.
-        if config.GEMINI_FALLBACK_MODELS:
-            max_retries = min(max_retries, 1)
+        # With other models to fall back on, waiting and retrying the same
+        # one is the slow option: a busy model stays busy for a while, and the
+        # next model usually answers within a second or two.
+        if self.fallbacks:
+            max_retries = 0
         return await super().request_with_retries(guarded, label, max_retries)
 
     async def chat(
@@ -94,15 +118,22 @@ class GeminiProvider(OpenAIProvider):
         max_tokens: int = 1024,
     ) -> AIResponse:
         """
-        Chat on the configured model, moving down GEMINI_FALLBACK_MODELS when
-        one runs out of its daily free-tier quota (each model has its own), is
-        retired, or keeps failing.
+        Chat on the configured model, moving straight down the fallbacks when
+        one is out of quota, rate-limited, overloaded, slow or retired.
         """
-        candidates = list(dict.fromkeys([self.model, *config.GEMINI_FALLBACK_MODELS]))
+        candidates = list(dict.fromkeys([self.model, *self.fallbacks]))
+        now = time.monotonic()
+        ready = [m for m in candidates if _unavailable_until.get(m, 0) <= now]
+        if not ready:
+            # Everything is cooling down. A short cool-down is only a guess
+            # that the model is still busy, so the soonest one is tried
+            # anyway rather than failing the reply outright.
+            soonest = min(candidates, key=lambda m: _unavailable_until.get(m, 0))
+            if _unavailable_until[soonest] - now <= 2 * 60:
+                ready = [soonest]
+
         last_error: Exception | None = None
-        for model in candidates:
-            if _unavailable_until.get(model, 0) > time.monotonic():
-                continue
+        for model in ready:
             try:
                 return await self._complete(model, messages, tools, tool_choice, temperature, max_tokens)
             except _DailyQuota as exc:
@@ -114,15 +145,20 @@ class GeminiProvider(OpenAIProvider):
                 status = getattr(exc, "status_code", None)
                 if status == 404:
                     # Retired or not available to this key.
-                    _unavailable_until[model] = time.monotonic() + 24 * 3600
-                elif status in {429, 500, 502, 503, 504}:
-                    _unavailable_until[model] = time.monotonic() + 60
+                    cooldown, why = 24 * 3600, "is not available"
+                elif status == 429:
+                    cooldown, why = _short_wait(exc), "is rate-limited"
+                elif status in {500, 502, 503, 504}:
+                    cooldown, why = BUSY_COOLDOWN_SECONDS, f"is overloaded (HTTP {status})"
+                elif isinstance(exc, (APITimeoutError, APIConnectionError)):
+                    cooldown, why = BUSY_COOLDOWN_SECONDS, "did not answer in time"
                 else:
                     raise
+                _unavailable_until[model] = time.monotonic() + cooldown
                 last_error = exc
-                logger.warning(f"Gemini model {model} failed with HTTP {status}; trying the next model.")
+                logger.warning(f"Gemini model {model} {why}; trying the next model.")
 
         waits = [until - time.monotonic() for m, until in _unavailable_until.items() if m in candidates]
-        if last_error is not None and (not waits or min(waits) <= 60):
-            raise last_error
+        if last_error is not None and (not waits or min(waits) <= 2 * 60):
+            raise AIBusy() from last_error
         raise AIQuotaExhausted(max(min(waits), 60) if waits else 3600)
