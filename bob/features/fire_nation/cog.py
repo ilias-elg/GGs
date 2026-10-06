@@ -722,32 +722,18 @@ class FireNationCog(commands.Cog):
 
     # ── /cleanup ─────────────────────────────────────────────────────────────
 
-    @app_commands.command(
-        name="cleanup", description="Delete Bob's own recent messages in a channel. Owner and Fire Lord only."
-    )
-    @app_commands.guild_only()
-    @app_commands.describe(
-        minutes="How far back to go. Default: 10.",
-        channel="Where to clean up. Default: this channel.",
-    )
-    async def cleanup(
-        self, interaction: discord.Interaction,
-        minutes: app_commands.Range[int, 1, 120] = 10,
-        channel: discord.TextChannel | None = None,
-    ) -> None:
-        if not can_manage(interaction.user):
-            await interaction.response.send_message(
-                "Access Denied — only the Owner or Fire Lord can clean up my messages.", ephemeral=True
-            )
-            return
-        target = channel or interaction.channel
-        await interaction.response.defer(ephemeral=True)
-        since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    ALL_SERVERS = "all"
+
+    async def _delete_own_messages(self, channel, since: datetime) -> tuple[int, int]:
+        """Deletes Bob's own messages in one channel since `since`. Returns (deleted, failed)."""
+        # Nothing has been posted there since the cut-off: skip the request.
+        if channel.last_message_id and discord.utils.snowflake_time(channel.last_message_id) < since:
+            return 0, 0
         deleted = failed = 0
         try:
             # Only his own messages, one at a time: a bot may always delete
             # those, whereas bulk deletion needs Manage Messages.
-            async for message in target.history(after=since, limit=None):
+            async for message in channel.history(after=since, limit=None):
                 if message.author.id != self.bot.user.id:
                     continue
                 try:
@@ -755,19 +741,97 @@ class FireNationCog(commands.Cog):
                     deleted += 1
                 except discord.HTTPException:
                     failed += 1
-        except discord.Forbidden:
+        except discord.HTTPException:
+            pass
+        return deleted, failed
+
+    async def _cleanup_server_choices(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        if not can_manage(interaction.user):
+            return []
+        choices = [app_commands.Choice(name="All servers", value=self.ALL_SERVERS)] + [
+            app_commands.Choice(name=guild.name[:100], value=str(guild.id)) for guild in self.bot.guilds
+        ]
+        return [c for c in choices if current.lower() in c.name.lower()][:25]
+
+    @app_commands.command(
+        name="cleanup", description="Delete Bob's own recent messages, here or in any server. Owner and Fire Lord only."
+    )
+    @app_commands.guild_only()
+    @app_commands.describe(
+        minutes="How far back to go. Default: 10.",
+        channel="One channel in this server. Default: this channel.",
+        server="Clean every channel of another server (or all servers) from here.",
+    )
+    @app_commands.autocomplete(server=_cleanup_server_choices)
+    async def cleanup(
+        self, interaction: discord.Interaction,
+        minutes: app_commands.Range[int, 1, 120] = 10,
+        channel: discord.TextChannel | None = None,
+        server: str | None = None,
+    ) -> None:
+        if not can_manage(interaction.user):
+            await interaction.response.send_message(
+                "Access Denied — only the Owner or Fire Lord can clean up my messages.", ephemeral=True
+            )
+            return
+        if server and channel:
+            await interaction.response.send_message(
+                "Pick either a channel or a server, not both.", ephemeral=True
+            )
+            return
+
+        span = f"the last {minutes} minute{'' if minutes == 1 else 's'}"
+        since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+
+        if server:
+            guilds = (
+                list(self.bot.guilds) if server == self.ALL_SERVERS
+                else [g for g in self.bot.guilds if str(g.id) == server or g.name.lower() == server.lower()]
+            )
+            if not guilds:
+                await interaction.response.send_message(
+                    "I'm not in a server by that name — pick one from the list.", ephemeral=True
+                )
+                return
+            await interaction.response.defer(ephemeral=True)
+            lines, total = [], 0
+            for guild in guilds:
+                deleted = failed = 0
+                for target in guild.text_channels:
+                    perms = target.permissions_for(guild.me)
+                    if not (perms.view_channel and perms.read_message_history):
+                        continue
+                    d, f = await self._delete_own_messages(target, since)
+                    deleted, failed = deleted + d, failed + f
+                total += deleted
+                lines.append(
+                    f"• **{discord.utils.escape_markdown(guild.name)}** — {deleted} deleted"
+                    + (f", {failed} could not be deleted" if failed else "")
+                )
+            logger.info(f"/cleanup by {interaction.user.id}: {total} of my messages across {len(guilds)} server(s), {minutes} min")
+            await interaction.edit_original_response(
+                content=f"Cleaned up my messages from {span}:\n" + "\n".join(lines)
+            )
+            return
+
+        target = channel or interaction.channel
+        await interaction.response.defer(ephemeral=True)
+        perms = target.permissions_for(interaction.guild.me)
+        if not (perms.view_channel and perms.read_message_history):
             await interaction.edit_original_response(
                 content=f"I can't read the message history in {target.mention}, so I can't find my messages there."
             )
             return
+        deleted, failed = await self._delete_own_messages(target, since)
         logger.info(f"/cleanup by {interaction.user.id}: deleted {deleted} of my messages in {target.id} ({minutes} min)")
         where = "" if target.id == interaction.channel_id else f" in {target.mention}"
         if not deleted and not failed:
-            reply = f"I haven't posted anything{where} in the last {minutes} minute{'' if minutes == 1 else 's'}."
+            reply = f"I haven't posted anything{where} in {span}."
         else:
             reply = (
-                f"Deleted **{deleted}** of my message{'' if deleted == 1 else 's'}{where} "
-                f"from the last {minutes} minute{'' if minutes == 1 else 's'}."
+                f"Deleted **{deleted}** of my message{'' if deleted == 1 else 's'}{where} from {span}."
                 + (f" {failed} could not be deleted." if failed else "")
             )
         await interaction.edit_original_response(content=reply)
