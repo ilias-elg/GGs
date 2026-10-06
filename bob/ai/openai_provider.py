@@ -59,7 +59,10 @@ class OpenAIProvider(AIProvider):
                 except json.JSONDecodeError:
                     args = {}
                 tool_calls.append(
-                    ToolCall(id=tc.id, name=tc.function.name, arguments=args)
+                    ToolCall(
+                        id=tc.id, name=tc.function.name, arguments=args,
+                        extra=(getattr(tc, "model_extra", None) or {}).get("extra_content"),
+                    )
                 )
 
         return AIResponse(

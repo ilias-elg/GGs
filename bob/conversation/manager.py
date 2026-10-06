@@ -172,6 +172,7 @@ def _build_assistant_message(response: AIResponse) -> dict:
                     "name": tc.name,
                     "arguments": json.dumps(tc.arguments, ensure_ascii=False),
                 },
+                **({"extra_content": tc.extra} if tc.extra else {}),
             }
             for tc in response.tool_calls
         ]
@@ -422,6 +423,8 @@ class ConversationManager:
                             "I already retried with backoff; please try again in a few seconds."
                         )
                     else:
-                        await message.reply(f"Something went wrong on my end: {e}")
+                        # The details are in the log; a raw API error in chat
+                        # helps nobody and can expose internals.
+                        await message.reply("Something went wrong on my end. Give it a moment and try again.")
                 except Exception:
                     pass

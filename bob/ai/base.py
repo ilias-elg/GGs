@@ -15,6 +15,10 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
+    # Provider data that has to be sent back unchanged with this call on the
+    # next round — Gemini's thought signature, without which it rejects the
+    # whole request.
+    extra: dict[str, Any] | None = None
 
 
 @dataclass
