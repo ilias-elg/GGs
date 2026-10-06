@@ -29,6 +29,7 @@ import config
 from bob.ai.base import AIProvider, AIResponse, ToolCall
 from bob.conversation import memory as mem
 from bob.conversation.context import build_context
+from bob.owner_alerts import report_error
 from bob.tools import get_tools_for_context, execute_tool
 
 logger = logging.getLogger("discord")
@@ -432,17 +433,5 @@ class ConversationManager:
 
             except Exception as e:
                 logger.error(f"ConversationManager error: {e}", exc_info=True)
-                try:
-                    if getattr(e, "user_message", None):
-                        await message.reply(e.user_message)
-                    elif getattr(e, "status_code", None) == 429:
-                        await message.reply(
-                            "The AI provider is rate-limiting requests right now. "
-                            "I already retried with backoff; please try again in a few seconds."
-                        )
-                    else:
-                        # The details are in the log; a raw API error in chat
-                        # helps nobody and can expose internals.
-                        await message.reply("Something went wrong on my end. Give it a moment and try again.")
-                except Exception:
-                    pass
+                # Nothing is said in the channel: the Owner is told privately.
+                await report_error(self.bot, e, what="replying in chat", message=message)

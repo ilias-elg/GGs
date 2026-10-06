@@ -16,6 +16,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
+from bob.owner_alerts import report_error
 from bob.voice.manager import get_voice_manager
 
 from . import conclusions, diagnostics, greetings, knowledge, merit, presence, tts
@@ -239,7 +240,14 @@ class FireNationCog(commands.Cog):
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:
         logger.error(f"/{interaction.command.qualified_name if interaction.command else '?'} failed: {error}", exc_info=error)
-        reply = f"Something went wrong running that command: {getattr(error, 'original', error)}"
+        name = interaction.command.qualified_name if interaction.command else "?"
+        await report_error(
+            self.bot, getattr(error, "original", error), what=f"running /{name}",
+            user=interaction.user, channel=interaction.channel,
+        )
+        # Only the person who ran it sees this, and it carries no details —
+        # without it the command would just hang on "thinking…".
+        reply = "That didn't go through. The Owner has been told."
         try:
             if interaction.response.is_done():
                 await interaction.edit_original_response(content=reply, view=None)
