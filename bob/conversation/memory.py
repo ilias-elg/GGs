@@ -25,6 +25,7 @@ MAX_HISTORY = max(40, config.MAX_CONTEXT_MESSAGES + 10)  # messages kept per cha
 _channel_history: dict[int, deque] = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 _channel_web_context: dict[int, str] = {}  # ephemeral per-channel web context
 _active_conversations: dict[int, dict] = {}
+_ended_at: dict[int, float] = {}
 _loaded_channels: set[int] = set()
 
 
@@ -46,8 +47,20 @@ def is_conversation_active(channel_id: int, user_id: int) -> bool:
     return state["user_id"] == user_id
 
 
+def conversation_open(channel_id: int) -> bool:
+    """True while Bob is in a conversation with anyone in this channel."""
+    state = _active_conversations.get(channel_id)
+    return bool(state) and state["expires_at"] > time.time()
+
+
 def end_conversation(channel_id: int) -> None:
     _active_conversations.pop(channel_id, None)
+    _ended_at[channel_id] = time.time()
+
+
+def ended_since(channel_id: int, since: float) -> bool:
+    """True when the channel's conversation was ended at or after `since` — a reply started before then must not be sent."""
+    return _ended_at.get(channel_id, 0.0) >= since
 
 
 def set_web_context(channel_id: int, text: str) -> None:

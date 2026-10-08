@@ -66,6 +66,9 @@ def _daily_quota_wait(exc: Exception) -> float | None:
 REQUEST_TIMEOUT_SECONDS = 20.0
 # How long a model is left alone after it was overloaded or timed out.
 BUSY_COOLDOWN_SECONDS = 30.0
+# After this long spent on models that failed, no further model is started:
+# five slow models in a row would otherwise keep someone waiting 100 seconds.
+MAX_TOTAL_SECONDS = 45.0
 
 
 def _short_wait(exc: Exception) -> float:
@@ -134,6 +137,8 @@ class GeminiProvider(OpenAIProvider):
 
         last_error: Exception | None = None
         for model in ready:
+            if last_error is not None and time.monotonic() - now > MAX_TOTAL_SECONDS:
+                break
             try:
                 return await self._complete(model, messages, tools, tool_choice, temperature, max_tokens)
             except _DailyQuota as exc:

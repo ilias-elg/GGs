@@ -89,6 +89,27 @@ _INFO_SCHEMAS = [s for s in _DISCORD_ADMIN_SCHEMAS if s["function"]["name"] in _
 _MODERATION_SCHEMAS = [s for s in _DISCORD_ADMIN_SCHEMAS if s["function"]["name"] not in _INFO_TOOL_NAMES]
 
 
+# Deliberately generous: a missed Roblox question costs an answer, an extra
+# offer of the tools costs nothing.
+_ROBLOX_EXTRA_WORDS = frozenset([
+    "server", "servers", "player", "find", "track", "tracking", "where", "alt", "alts", "profile",
+    "user", "username", "account", "raid", "raiding", "raids", "nation", "tribe", "tribes", "enemy",
+    "enemies", "active", "member", "members", "badge", "badges", "inventory", "avatar", "stats",
+    "count", "many", "who's", "whos", "anyone", "anybody", "ingame", "rank", "ranks", "groups",
+    "games", "investigate", "lookup",
+])
+_ROBLOX_WORDS = frozenset(k for k in _ROBLOX_KEYWORDS if " " not in k) | _ROBLOX_EXTRA_WORDS
+_ROBLOX_PHRASES = tuple(k for k in _ROBLOX_KEYWORDS if " " in k) + ("how many", "who is", "look up")
+
+
+def _wants_roblox(text: str) -> bool:
+    """True when the text could be about the monitored groups, the game or a Roblox player."""
+    lower = text.lower().replace("’", "'")
+    if set(re.findall(r"[a-z0-9'-]+", lower)) & _ROBLOX_WORDS:
+        return True
+    return any(phrase in lower for phrase in _ROBLOX_PHRASES)
+
+
 def _wants_discord_admin(content: str) -> bool:
     """
     Return True only when the message is clearly asking for a Discord admin action.
@@ -126,7 +147,7 @@ def get_tools_for_context(
     words = set(lower.split())
 
     # Detect which categories are relevant
-    wants_roblox = bool(words & _ROBLOX_KEYWORDS) or "how many" in lower or "who is" in lower
+    wants_roblox = _wants_roblox(content) or _wants_roblox(recent_text)
     wants_discord = in_guild and _wants_discord_admin(content)
     wants_voice = in_guild and any(phrase in lower for phrase in _VOICE_KEYWORDS)
     wants_web = bool(words & _WEB_KEYWORDS) or "http" in lower or "trello.com" in lower
@@ -142,8 +163,11 @@ def get_tools_for_context(
         schemas.append(LOCAL_TASK_SCHEMA)
         schemas.extend(FILE_SCHEMAS)
 
-    # Always include Roblox tools — most queries in this server are Roblox-related
-    schemas.extend(ROBLOX_SCHEMAS)
+    # Roblox tools — offered when this message or the last couple are about
+    # the groups, the game or a player. Handing them over on every message
+    # had the model running live lookups to answer small talk.
+    if config.FULL_TOOLSET or wants_roblox:
+        schemas.extend(ROBLOX_SCHEMAS)
 
     # Web search — include when looking things up or a URL is present
     if config.FULL_TOOLSET or wants_web:

@@ -167,9 +167,27 @@ _DISMISSAL = re.compile(
     r"^((ok(ay)?|please|bob)[, ]+)*(stop|quit)\b"
     r"|\b(shut up|be quiet|go away|leave me alone|end (the )?conversation|never ?mind)\b"
     r"|\bthank(s| you)\b|\bthat'?(s|ll be) all\b|\bthat'?s enough\b|\bgood ?bye\b|\bbye\b"
-    r"|\bdismiss(ed)?\b|\byou'?re (free|dismissed)\b|\ball good\b",
+    r"|\byou'?re free\b|\ball good\b",
     re.IGNORECASE,
 )
+
+# Words that may sit around "dismissed" without making it a sentence about
+# something else: "ok bob, you're dismissed for now" is the order, "was he
+# dismissed from the group?" is a question for the AI.
+_STAND_DOWN_FILLER = frozenset(
+    "ok okay alright right bob you you're youre your ur u are r is be consider yourself now for "
+    "that's thats that will all thanks thank good work and so then just please grand archivist "
+    "soldier go on off can may i'm im done we're were here it".split()
+)
+
+
+def _is_stand_down(content: str) -> bool:
+    """True for the order "dismissed", however it is dressed up."""
+    if "?" in content:
+        return False
+    words = re.findall(r"[a-z']+", content.lower().replace("’", "'"))
+    orders = [w for w in words if w in ("dismissed", "dismiss")]
+    return bool(orders) and len(words) <= 10 and all(w in _STAND_DOWN_FILLER for w in words if w not in orders)
 
 
 def _is_dismissal(content: str) -> bool:
@@ -178,6 +196,8 @@ def _is_dismissal(content: str) -> bool:
     "stop responding to me", "that'll be all"). Longer messages are left to
     the AI, so "thanks — now check the leaderboard" still gets answered.
     """
+    if _is_stand_down(content):
+        return True
     words = content.split()
     return 0 < len(words) <= 6 and bool(_DISMISSAL.search(content))
 
@@ -236,26 +256,32 @@ async def on_message(message: discord.Message):
     # Bob only converses with the Owner, the Fire Lord and anyone on the
     # standing-access list. Everyone else still has the slash commands.
     from bob.features.fire_nation.ranks import has_access
-    if (
-        sleep_state == "asleep"
-        or not has_access(message.author)
-        or not _is_addressed_to_bob(message)
-    ):
+    if sleep_state == "asleep" or not has_access(message.author):
         await bot.process_commands(message)
         return
 
-    from bob.conversation import memory as mem
+    addressed = _is_addressed_to_bob(message)
+
+    # "Dismissed" from anyone he answers to ends the conversation in this
+    # channel, whoever started it, and drops any reply still being written.
+    # The softer endings ("thanks", "bye") only count from the person he is
+    # talking with, so two members thanking each other don't cut him off.
+    if (_is_stand_down(content) and (addressed or mem.conversation_open(message.channel.id))) or (
+        addressed and _is_dismissal(content)
+    ):
+        mem.end_conversation(message.channel.id)
+        await message.reply("Understood. Standing down.")
+        return
+
+    if not addressed:
+        await bot.process_commands(message)
+        return
+
     mem.activate_conversation(message.channel.id, message.author.id)
 
     # "join vc" / "leave vc" / "say that out loud" / "voice status"
     from bob.voice.manager import get_voice_manager
     if await chat_hooks.handle_voice_phrase(message, content, get_voice_manager(bot)):
-        return
-
-    # A natural way to end a conversation without needing a command.
-    if _is_dismissal(content):
-        mem.end_conversation(message.channel.id)
-        await message.reply("Got it — I’ll stay quiet until you call me again.")
         return
 
     if not content:

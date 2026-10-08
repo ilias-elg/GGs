@@ -27,6 +27,7 @@ import discord
 
 import config
 from bob.ai.base import AIProvider, AIResponse, ToolCall
+from bob.ai.gemini_provider import AIQuotaExhausted
 from bob.conversation import memory as mem
 from bob.conversation.context import build_context
 from bob.owner_alerts import report_error
@@ -53,6 +54,14 @@ _CONFIRMATION_TOOLS = frozenset({
 })
 _YES_WORDS = frozenset({"yes", "y", "yeah", "yep", "sure", "confirm", "confirmed", "do it", "go ahead", "proceed"})
 _NO_WORDS = frozenset({"no", "n", "nope", "cancel", "stop", "don't", "do not"})
+
+# Said in the channel when a reply could not be produced. The reason goes to
+# the Owner by DM; the person asking is never left talking to nobody.
+_FAILED_REPLY = "Lost my train of thought there. Give me a moment and say that again."
+_OUT_OF_QUOTA_REPLY = "I've got nothing left in the tank for now. Slash commands still work; I'll be back to talking later."
+_NO_ANSWER_REPLY = "I've got nothing on that one. Put it another way?"
+# Sent as one more turn when the model came back with no text at all.
+_ANSWER_NUDGE = "(Reply to the last message now, in plain words, in character. Do not call a tool.)"
 
 
 def _get_bg_provider() -> AIProvider:
@@ -280,7 +289,11 @@ class ConversationManager:
     async def handle(self, message: discord.Message, content: str) -> None:
         """Entry point — acquires per-channel lock, then runs the agent loop."""
         channel_id = message.channel.id
+        started = time.time()
         async with self._locks[channel_id]:
+            # Dismissed while this message was waiting its turn.
+            if mem.ended_since(channel_id, started):
+                return
             key = (channel_id, message.author.id)
             pending = self._pending_confirmations.get(key)
             if pending:
@@ -301,11 +314,15 @@ class ConversationManager:
                     return
                 # A new request supersedes an unanswered confirmation.
                 self._pending_confirmations.pop(key, None)
-            await self._agent_loop(message, content)
+            await self._agent_loop(message, content, started)
 
-    async def _agent_loop(self, message: discord.Message, content: str) -> None:
+    async def _agent_loop(self, message: discord.Message, content: str, started: float) -> None:
         """Full agentic pipeline: context → AI → tools → AI → ... → respond."""
         channel_id = message.channel.id
+
+        def stood_down() -> bool:
+            # "Dismissed" arrived while this reply was being worked on.
+            return mem.ended_since(channel_id, started)
         user_id = message.author.id
         username = message.author.display_name
         guild_id = message.guild.id if message.guild else None
@@ -352,6 +369,8 @@ class ConversationManager:
                 rounds = 0
                 dashboard_sent = False
                 while response.has_tool_calls and rounds < config.MAX_TOOL_ROUNDS:
+                    if stood_down():
+                        return
                     rounds += 1
                     logger.info(
                         f"Tool round {rounds}: calling {[tc.name for tc in response.tool_calls]}"
@@ -405,6 +424,9 @@ class ConversationManager:
                         max_tokens=1024,
                     )
 
+                if stood_down():
+                    return
+
                 # ── Extract final text ───────────────────────────────────────
                 answer = response.content or ""
 
@@ -412,7 +434,19 @@ class ConversationManager:
                 if dashboard_sent:
                     answer = ""
                 elif not answer.strip():
-                    answer = "Hmm, got nothing back on that one. Try again?"
+                    # The model returned no words: it ran out of tool rounds,
+                    # spent its output on thinking, or balked at an odd
+                    # question. Ask once more with tools off the table.
+                    logger.info(f"Empty AI reply (finish_reason={response.finish_reason}); asking again without tools.")
+                    retry = await self.ai.chat(
+                        messages=messages + [{"role": "user", "content": _ANSWER_NUDGE}],
+                        tools=None,
+                        temperature=0.75,
+                        max_tokens=2048,
+                    )
+                    answer = (retry.content or "").strip() or _NO_ANSWER_REPLY
+                    if stood_down():
+                        return
 
                 # ── Send response ────────────────────────────────────────────
                 if answer.strip():
@@ -438,5 +472,13 @@ class ConversationManager:
 
             except Exception as e:
                 logger.error(f"ConversationManager error: {e}", exc_info=True)
-                # Nothing is said in the channel: the Owner is told privately.
+                # The Owner gets what went wrong privately; the channel only
+                # gets a line saying to ask again, never the error itself.
                 await report_error(self.bot, e, what="replying in chat", message=message)
+                if not stood_down():
+                    try:
+                        await message.reply(
+                            _OUT_OF_QUOTA_REPLY if isinstance(e, AIQuotaExhausted) else _FAILED_REPLY
+                        )
+                    except discord.HTTPException as send_error:
+                        logger.warning(f"Could not send the fallback reply: {send_error}")
