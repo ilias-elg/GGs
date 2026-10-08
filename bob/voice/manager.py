@@ -6,6 +6,7 @@ import os
 import time
 
 import discord
+from discord.ext import commands
 
 import config
 
@@ -20,6 +21,7 @@ READY_WAIT_SECONDS = 10
 # A clip that hasn't finished this long after its own length has stalled.
 PLAYBACK_GRACE_SECONDS = 15
 MAX_EVENTS = 15
+CONNECT_TIMEOUT_SECONDS = 20
 
 
 class _GuildVoice:
@@ -40,7 +42,7 @@ class VoiceManager:
     never talk over each other — they play in order.
     """
 
-    def __init__(self, bot: discord.ext.commands.Bot) -> None:
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._guilds: dict[int, _GuildVoice] = {}
         # The last few things that happened in voice, per server, so "voice
@@ -60,7 +62,12 @@ class VoiceManager:
                 await vc.move_to(channel)
                 logger.info(f"Moved to voice channel: {channel.name} in {guild.name}")
             else:
-                vc = await channel.connect(self_deaf=True)
+                if vc:
+                    # A dead connection left behind by a failed join or a
+                    # drop. Until it is cleared Discord refuses a new one
+                    # with "Already connected to a voice channel".
+                    await vc.disconnect(force=True)
+                vc = await channel.connect(self_deaf=True, timeout=CONNECT_TIMEOUT_SECONDS)
                 logger.info(f"Joined voice channel: {channel.name} in {guild.name}")
             self.event(guild.id, f"joined {channel.name}")
 
@@ -74,6 +81,9 @@ class VoiceManager:
                     )
 
             return {"success": True, "result": f"Joined {channel.name}."}
+        except asyncio.TimeoutError:
+            self.event(guild.id, f"failed to join {channel.name}: Discord's voice server didn't answer")
+            return {"error": "Discord's voice server didn't answer in time. Try again in a moment."}
         except discord.ClientException as e:
             self.event(guild.id, f"failed to join {channel.name}: {e}")
             return {"error": f"Voice connection error: {e}"}
