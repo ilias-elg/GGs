@@ -158,7 +158,8 @@ class VoiceManager:
     # ── Speech ───────────────────────────────────────────────────────────────
 
     async def speak(
-        self, guild: discord.Guild, text: str, *, cache: bool = False, label: str | None = None
+        self, guild: discord.Guild, text: str, *, cache: bool = False, label: str | None = None,
+        delivery: str | None = None,
     ) -> tuple[bool, str]:
         """
         Speaks a line in the server's voice channel. Speech is generated
@@ -179,7 +180,7 @@ class VoiceManager:
             return False, "I've already got several lines queued up — give me a moment."
 
         state.pending += 1
-        synthesis = asyncio.create_task(tts.synthesize_speech(text, cache=cache))
+        synthesis = asyncio.create_task(tts.synthesize_speech(text, cache=cache, delivery=delivery))
         try:
             async with state.lock:
                 speech = await synthesis

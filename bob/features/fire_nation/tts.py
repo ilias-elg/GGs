@@ -110,11 +110,12 @@ def pick_tts_model(models: list[dict]) -> str | None:
     return next((n for n in tts if "flash" in n.lower()), tts[0] if tts else None)
 
 
-def build_tts_request(text: str, voice: str) -> dict:
+def build_tts_request(text: str, voice: str, delivery: str | None = None) -> dict:
     """Request body for one spoken line. Gemini TTS follows plain-language style
-    directions placed before the text to be spoken."""
+    directions placed before the text to be spoken; `delivery` replaces the
+    default one when a line calls for a particular tone."""
     return {
-        "contents": [{"parts": [{"text": f"{config.TTS_DELIVERY} {text}"}]}],
+        "contents": [{"parts": [{"text": f"{delivery or config.TTS_DELIVERY} {text}"}]}],
         "generationConfig": {
             "responseModalities": ["AUDIO"],
             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
@@ -174,12 +175,14 @@ async def resolve_tts_model(api_key: str) -> str | None:
     return _discovered_tts_model
 
 
-def _cache_path(model: str, voice: str, text: str) -> str:
-    key = hashlib.sha1(f"{model}|{voice}|{config.TTS_DELIVERY}|{text}".encode()).hexdigest()
+def _cache_path(model: str, voice: str, text: str, delivery: str | None = None) -> str:
+    key = hashlib.sha1(f"{model}|{voice}|{delivery or config.TTS_DELIVERY}|{text}".encode()).hexdigest()
     return os.path.join(VOICE_CACHE_DIR, f"{key}.pcm")
 
 
-async def synthesize_speech(text: str, voice: str | None = None, cache: bool = False) -> Speech:
+async def synthesize_speech(
+    text: str, voice: str | None = None, cache: bool = False, delivery: str | None = None
+) -> Speech:
     """
     Turns text into raw 16-bit mono PCM. `cache` keeps a copy on disk — used
     for fixed lines ("Welcome back.") so each one only ever costs a single TTS
@@ -198,7 +201,7 @@ async def synthesize_speech(text: str, voice: str | None = None, cache: bool = F
     if not model:
         return Speech(False, reason="no text-to-speech model is available to this API key")
 
-    path = _cache_path(model, voice, text) if cache else None
+    path = _cache_path(model, voice, text, delivery) if cache else None
     if path:
         try:
             with open(path, "rb") as f:
@@ -207,7 +210,7 @@ async def synthesize_speech(text: str, voice: str | None = None, cache: bool = F
             pass  # not cached yet
 
     try:
-        status, body = await google_fetch(f"models/{model}:generateContent", api_key, build_tts_request(text, voice))
+        status, body = await google_fetch(f"models/{model}:generateContent", api_key, build_tts_request(text, voice, delivery))
     except httpx.HTTPError as e:
         return Speech(False, reason=f"couldn't reach Google ({e})")
     if status != 200:

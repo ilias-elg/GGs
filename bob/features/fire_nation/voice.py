@@ -16,7 +16,7 @@ import discord
 
 import config
 
-from . import greetings
+from . import greetings, tone as tone_feature
 from .ranks import has_access
 from .tts import clean_for_speech
 
@@ -50,15 +50,23 @@ async def leave_member_guild(vm, member: discord.Member) -> str:
     return "Leaving voice." if left.get("success") else "I'm not in a voice channel on this server."
 
 
-async def say_in_voice(vm, member: discord.Member, text: str) -> str:
-    """Speaks `text` and reports honestly whether it actually played."""
+async def say_in_voice(vm, member: discord.Member, text: str, tone: str | None = None) -> str:
+    """
+    Speaks `text` and reports honestly whether it actually played. The tone
+    comes from `tone` when one is chosen, otherwise from how the text is
+    written — read before it is cleaned, since capitals, emoji and "/s" are
+    exactly what cleaning removes.
+    """
     if not vm.current_channel(member.guild):
         return 'I\'m not in a voice channel — say "bob, join vc" or use `/voice join` first.'
-    line = clean_for_speech(text, member.guild)
+    chosen, spoken = tone_feature.tone_for(text, tone)
+    line = clean_for_speech(spoken, member.guild)
     if not line:
         return "There's nothing there I can actually say aloud."
-    ok, reason = await vm.speak(member.guild, line)
-    return "Said aloud." if ok else f"I couldn't say that aloud — {reason}"
+    ok, reason = await vm.speak(member.guild, line, delivery=tone_feature.delivery_for(chosen))
+    if not ok:
+        return f"I couldn't say that aloud — {reason}"
+    return f"Said aloud — tone: {chosen.label.lower() if chosen else 'neutral'}."
 
 
 def voice_status_report(vm, guild: discord.Guild) -> str:

@@ -20,6 +20,7 @@ from bob.owner_alerts import report_error
 from bob.voice.manager import get_voice_manager
 
 from . import conclusions, diagnostics, greetings, knowledge, merit, presence, tts
+from . import tone as tone_feature
 from . import voice as voice_feature
 from .ranks import can_manage, get_rank, has_access, rank_at_least
 
@@ -942,15 +943,22 @@ class FireNationCog(commands.Cog):
         await interaction.response.send_message(reply, ephemeral=True)
 
     @voice.command(name="say", description="Bob says something aloud in his voice channel.")
-    @app_commands.describe(text="What Bob should say.")
+    @app_commands.describe(
+        text="What Bob should say. Capitals, !!, ?, ... and emoji shape how he says it.",
+        tone="Force a tone instead of letting Bob read it from the text.",
+    )
+    @app_commands.choices(tone=[
+        app_commands.Choice(name="Neutral (ignore the text's tone)", value="neutral"),
+        *(app_commands.Choice(name=t.label, value=t.name) for t in tone_feature.TONES.values()),
+    ])
     async def voice_say(
-        self, interaction: discord.Interaction, text: app_commands.Range[str, 1, 600]
+        self, interaction: discord.Interaction, text: app_commands.Range[str, 1, 600], tone: str | None = None
     ) -> None:
         if not await self._voice_access(interaction):
             return
         # Generating speech can take several seconds.
         await interaction.response.defer(ephemeral=True)
-        reply = await voice_feature.say_in_voice(self.voice_manager, interaction.user, text)
+        reply = await voice_feature.say_in_voice(self.voice_manager, interaction.user, text, tone)
         await interaction.edit_original_response(content=reply)
 
     @voice.command(name="status", description="Where Bob is in voice and what happened recently.")
