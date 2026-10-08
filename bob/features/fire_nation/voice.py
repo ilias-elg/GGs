@@ -173,8 +173,14 @@ def match_voice_phrase(text: str) -> str | None:
 # ─── Greetings ────────────────────────────────────────────────────────────────
 # When someone Bob works for — Owner, Fire Lord, or the standing-access list —
 # joins the voice channel he's in, he greets them with their custom line
-# (/voice greeting) or the default. Nobody else is ever greeted. Each line is
-# cached, so repeats cost nothing.
+# (/voice greeting) or the default. Anyone else is greeted only if the Owner
+# or Fire Lord has given them a custom line; a greeting is not chat access.
+# Each line is cached, so repeats cost nothing.
+
+
+def is_greeted(member: discord.Member) -> bool:
+    return has_access(member) or greetings.has_custom_greeting(member.id)
+
 
 # Only there to absorb connection flapping (a client dropping and rejoining
 # within seconds) — a real leave-and-rejoin should always get a greeting.
@@ -211,8 +217,8 @@ async def handle_voice_state_update(
         return
 
     who = member.display_name
-    if not has_access(member):
-        vm.event(guild.id, f"{who} joined — not greeted (not on the access list)")
+    if not is_greeted(member):
+        vm.event(guild.id, f"{who} joined — not greeted (no custom greeting, not on the access list)")
         return
 
     key = (guild.id, member.id)
@@ -266,13 +272,13 @@ def group_greeting_line(names: list[str]) -> str:
 
 
 async def greet_present_members(vm, channel, summoner_id: int) -> None:
-    """Greets everyone with access who was already in `channel` when Bob joined it."""
+    """Greets everyone he greets who was already in `channel` when Bob joined it."""
     guild = channel.guild
     present = [m for m in channel.members if not m.bot and m.id != summoner_id]
-    greeted = [m for m in present if has_access(m)]
+    greeted = [m for m in present if is_greeted(m)]
     if not greeted:
         if present:
-            vm.event(guild.id, "nobody else here on the access list — no group greeting")
+            vm.event(guild.id, "nobody else here that I greet — no group greeting")
         return
     # Counts as their greeting, so someone who blips out and back isn't greeted twice.
     now = time.time()

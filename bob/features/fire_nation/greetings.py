@@ -59,6 +59,10 @@ def list_greetings() -> list[tuple[str, str]]:
     return list(_greetings.items())
 
 
+def has_custom_greeting(user_id: int) -> bool:
+    return str(user_id) in _greetings
+
+
 def greeting_for(user_id: int, display_name: str) -> str:
     """The line to say when this person joins — their custom one, or the default."""
     line = _greetings.get(str(user_id), DEFAULT_GREETING)

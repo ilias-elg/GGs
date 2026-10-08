@@ -971,9 +971,8 @@ class FireNationCog(commands.Cog):
         )
 
     # Anyone on the access list can set their own greeting; the Owner and Fire
-    # Lord can set anyone's. Greetings only ever play for people with access,
-    # so setting one for someone without it is refused rather than saved
-    # uselessly.
+    # Lord can set anyone's, including people who are not on the list — a
+    # custom greeting gets them greeted, and nothing more.
 
     @greeting.command(name="set", description="Set someone's greeting (your own, or anyone's if you're Owner/Fire Lord).")
     @app_commands.describe(
@@ -993,11 +992,6 @@ class FireNationCog(commands.Cog):
             return "You can only change your own greeting — the Owner and Fire Lord can change anyone's."
         if target.bot:
             return "Bots aren't greeted."
-        if not has_access(target):
-            return (
-                f"{target.mention} isn't on my access list, and I only greet people who are — "
-                "so I haven't saved it."
-            )
         line = " ".join(line.split())
         if not line:
             return "The greeting can't be empty."
@@ -1018,7 +1012,11 @@ class FireNationCog(commands.Cog):
         if user.id != interaction.user.id and not can_manage(interaction.user):
             reply = "You can only change your own greeting — the Owner and Fire Lord can change anyone's."
         elif greetings.clear_greeting(user.id):
-            reply = f'Cleared — {user.mention} gets "{greetings.DEFAULT_GREETING}" again.'
+            reply = (
+                f'Cleared — {user.mention} gets "{greetings.DEFAULT_GREETING}" again.'
+                if has_access(user)
+                else f"Cleared — {user.mention} isn't on my access list, so they won't be greeted any more."
+            )
         else:
             reply = f"{user.mention} doesn't have a custom greeting."
         await interaction.response.send_message(reply, ephemeral=True)
