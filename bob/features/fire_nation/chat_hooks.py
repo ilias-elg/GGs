@@ -71,7 +71,7 @@ async def handle_voice_phrase(message: discord.Message, content: str, voice_mana
         elif phrase == "leave":
             reply = await voice_feature.leave_member_guild(voice_manager, member)
         elif phrase == "status":
-            reply = voice_feature.voice_status_report(voice_manager, message.guild)
+            reply = voice_feature.voice_status_report(voice_manager, message.guild, member)
         else:
             last = _last_reply(message.channel.id)
             reply = (

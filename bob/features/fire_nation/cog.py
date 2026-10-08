@@ -926,7 +926,7 @@ class FireNationCog(commands.Cog):
         )
         return False
 
-    @voice.command(name="join", description="Bob joins the voice channel you're in.")
+    @voice.command(name="join", description="Bob joins the voice channel you're in, on any server he's on.")
     async def voice_join(self, interaction: discord.Interaction) -> None:
         if not await self._voice_access(interaction):
             return
@@ -935,7 +935,7 @@ class FireNationCog(commands.Cog):
         reply = await voice_feature.join_member_channel(self.voice_manager, interaction.user)
         await interaction.edit_original_response(content=reply)
 
-    @voice.command(name="leave", description="Bob leaves voice on this server.")
+    @voice.command(name="leave", description="Bob leaves the voice channel he's in with you.")
     async def voice_leave(self, interaction: discord.Interaction) -> None:
         if not await self._voice_access(interaction):
             return
@@ -966,7 +966,8 @@ class FireNationCog(commands.Cog):
         if not await self._voice_access(interaction):
             return
         await interaction.response.send_message(
-            voice_feature.voice_status_report(self.voice_manager, interaction.guild), ephemeral=True
+            voice_feature.voice_status_report(self.voice_manager, interaction.guild, interaction.user),
+            ephemeral=True,
         )
 
     # Anyone on the access list can set their own greeting; the Owner and Fire

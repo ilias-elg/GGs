@@ -25,29 +25,74 @@ logger = logging.getLogger("discord")
 JOIN_LINE = "Voice systems online."
 
 
-async def join_member_channel(vm, member: discord.Member) -> str:
-    channel = member.voice.channel if member.voice else None
-    if not channel:
-        return "You'll need to be in a voice channel first — I join whichever one you're in."
-    perms = channel.permissions_for(member.guild.me)
-    if not (perms.view_channel and perms.connect and perms.speak):
-        return f"I don't have permission to join and speak in {channel.name}."
+# ─── Which server a voice command is about ───────────────────────────────────
+# The command doesn't have to be typed where the voice channel is: someone
+# sitting in a voice channel on one server can run it from another, as long
+# as Bob is on both.
 
-    current = vm.current_channel(member.guild)
+
+def member_voice_channel(vm, member: discord.Member):
+    """The voice channel this person is in — here, or on any other server Bob shares with them."""
+    if member.voice and member.voice.channel:
+        return member.voice.channel
+    for guild in vm.bot.guilds:
+        there = guild.get_member(member.id)
+        if there and there.voice and there.voice.channel:
+            return there.voice.channel
+    return None
+
+
+def voice_guild_for(vm, member: discord.Member) -> discord.Guild:
+    """
+    The server whose voice connection this person means: where they are in
+    voice with Bob, else this server if he is in voice here, else the only
+    other server they share where he is in voice.
+    """
+    channel = member_voice_channel(vm, member)
+    if channel and vm.current_channel(channel.guild):
+        return channel.guild
+    if vm.current_channel(member.guild):
+        return member.guild
+    shared = [
+        vc.guild for vc in vm.bot.voice_clients
+        if vc.is_connected() and vc.guild.get_member(member.id)
+    ]
+    return shared[0] if len(shared) == 1 else member.guild
+
+
+def _elsewhere(guild: discord.Guild, member: discord.Member) -> str:
+    """ " on **Server**" when `guild` is not the server the command was typed in."""
+    return "" if guild.id == member.guild.id else f" on **{discord.utils.escape_markdown(guild.name)}**"
+
+
+async def join_member_channel(vm, member: discord.Member) -> str:
+    channel = member_voice_channel(vm, member)
+    if not channel:
+        return "You'll need to be in a voice channel first — I join whichever one you're in, on any server I'm on."
+    guild = channel.guild
+    where = f"**{channel.name}**{_elsewhere(guild, member)}"
+    perms = channel.permissions_for(guild.me)
+    if not (perms.view_channel and perms.connect and perms.speak):
+        return f"I don't have permission to join and speak in {where}."
+
+    current = vm.current_channel(guild)
     if current and current.id == channel.id:
-        return f"I'm already in **{channel.name}**."
-    joined = await vm.join(member.guild, channel)
+        return f"I'm already in {where}."
+    joined = await vm.join(guild, channel)
     if "error" in joined:
-        return f"I couldn't join {channel.name} — {joined['error']}"
+        return f"I couldn't join {where} — {joined['error']}"
     # Don't hold the reply up waiting for the lines to finish playing.
-    asyncio.create_task(vm.speak(member.guild, JOIN_LINE, cache=True))
+    asyncio.create_task(vm.speak(guild, JOIN_LINE, cache=True))
     asyncio.create_task(greet_present_members(vm, channel, member.id))
-    return f"Joined **{channel.name}**."
+    return f"Joined {where}."
 
 
 async def leave_member_guild(vm, member: discord.Member) -> str:
-    left = await vm.leave(member.guild, f"asked by {member.display_name}")
-    return "Leaving voice." if left.get("success") else "I'm not in a voice channel on this server."
+    guild = voice_guild_for(vm, member)
+    left = await vm.leave(guild, f"asked by {member.display_name}")
+    if left.get("success"):
+        return f"Leaving voice{_elsewhere(guild, member)}."
+    return "I'm not in a voice channel on this server, or on any other we share."
 
 
 async def say_in_voice(vm, member: discord.Member, text: str, tone: str | None = None) -> str:
@@ -57,26 +102,32 @@ async def say_in_voice(vm, member: discord.Member, text: str, tone: str | None =
     written — read before it is cleaned, since capitals, emoji and "/s" are
     exactly what cleaning removes.
     """
-    if not vm.current_channel(member.guild):
+    guild = voice_guild_for(vm, member)
+    if not vm.current_channel(guild):
         return 'I\'m not in a voice channel — say "bob, join vc" or use `/voice join` first.'
     chosen, spoken = tone_feature.tone_for(text, tone)
+    # Mentions are looked up where the text was typed — that is the server they belong to.
     line = clean_for_speech(spoken, member.guild)
     if not line:
         return "There's nothing there I can actually say aloud."
-    ok, reason = await vm.speak(member.guild, line, delivery=tone_feature.delivery_for(chosen))
+    ok, reason = await vm.speak(guild, line, delivery=tone_feature.delivery_for(chosen))
     if not ok:
         return f"I couldn't say that aloud — {reason}"
-    return f"Said aloud — tone: {chosen.label.lower() if chosen else 'neutral'}."
+    return f"Said aloud{_elsewhere(guild, member)} — tone: {chosen.label.lower() if chosen else 'neutral'}."
 
 
-def voice_status_report(vm, guild: discord.Guild) -> str:
-    """Where Bob is and what happened recently."""
+def voice_status_report(vm, guild: discord.Guild, member: discord.Member | None = None) -> str:
+    """Where Bob is and what happened recently — for the server `member` means, when given."""
+    here = guild
+    if member is not None:
+        guild = voice_guild_for(vm, member)
     channel = vm.current_channel(guild)
     if channel:
         leaving = (
             ", leaving in under 15 min unless someone joins" if vm.alone_timer_running(guild.id) else ""
         )
-        head = f"In <#{channel.id}>, connected{leaving}."
+        server = "" if guild.id == here.id else f" on **{discord.utils.escape_markdown(guild.name)}**"
+        head = f"In <#{channel.id}>{server}, connected{leaving}."
     else:
         head = "Not in a voice channel."
     recent = vm.recent_events(guild.id)
