@@ -27,6 +27,8 @@ from .fire_nation_tools import (
     get_fire_nation_schemas,
     execute_fire_nation_tool,
 )
+import re
+
 import config
 
 # ---------------------------------------------------------------------------
@@ -189,7 +191,29 @@ def get_tools_for_context(
             seen.add(name)
             unique.append(s)
 
+    # The dashboard posts a large embed, and the model kept reaching for it on
+    # messages that had nothing to do with it. So it is only on the table when
+    # the message asks for it — decided here, not left to the model.
+    if not wants_dashboard(content, recent_text):
+        unique = [s for s in unique if s["function"]["name"] != "send_dashboard"]
+
     return unique
+
+
+_DASHBOARD_INTENT = re.compile(
+    r"\b(dash\w*|overview|sit\W?rep|live (stats?|intel\w*|feed|data|numbers)|intel(ligence)?"
+    r"|(status|summary|rundown|stats?) (of|on|for) (the |all |every )?(groups?|tribes?|nations?|servers?|everyone)"
+    r"|all (the |three |3 )?groups)\b",
+    re.IGNORECASE,
+)
+_AGAIN = re.compile(r"\b(again|refresh|resend|update it|once more|another one|one more time)\b", re.IGNORECASE)
+
+
+def wants_dashboard(content: str, recent_text: str = "") -> bool:
+    """True when this message asks for the dashboard, or asks to repeat one that was just requested."""
+    if _DASHBOARD_INTENT.search(content):
+        return True
+    return len(content.split()) <= 6 and bool(_AGAIN.search(content)) and bool(_DASHBOARD_INTENT.search(recent_text))
 
 
 def get_all_schemas(in_guild: bool = True) -> list[dict]:

@@ -420,7 +420,12 @@ class ConversationManager:
                     mem.activate_conversation(channel_id, user_id)
 
                 # ── Update history ───────────────────────────────────────────
-                mem.add_to_history(channel_id, "assistant", answer)
+                # An empty turn would read back to the model as "I answered
+                # that with nothing", so say what was actually sent.
+                mem.add_to_history(
+                    channel_id, "assistant",
+                    answer or "[Posted the live dashboard embed because it was asked for.]",
+                )
 
                 # ── Background tasks (non-blocking) ─────────────────────────
                 snippet = f"{username}: {content}\nBob: {answer}"
