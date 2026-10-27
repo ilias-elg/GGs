@@ -161,7 +161,7 @@ async def build_dashboard_embed() -> discord.Embed:
 
     async with aiosqlite.connect(DB_PATH, timeout=15.0) as db:
         last_ts = await _latest_ts(db)
-        scan_str, stale = await _scan_age(last_ts)
+        scan_str, _ = await _scan_age(last_ts)
 
         # ── SYSTEM STATUS bar (description) ─────────────────────────────────
         embed.description = (

@@ -797,7 +797,7 @@ async def _create_channel(
     category_name: str | None = args.get("category")
     topic: str | None = args.get("topic")
     private: bool = args.get("private", False)
-    reason: str = args.get("reason") or f"Created by {author.display_name} via Bob"
+    reason: str = args.get("reason") or f"Created by {author.display_name} via the Archivist"
 
     ch_type_map = {
         "text": discord.ChannelType.text,
@@ -866,7 +866,7 @@ async def _delete_channel(
     if not ch:
         return {"error": f"Channel not found: {args['channel']}"}
 
-    reason = args.get("reason") or f"Deleted by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Deleted by {author.display_name} via the Archivist"
     ch_name = ch.name
     await ch.delete(reason=reason)
     return {"success": True, "result": f"Deleted #{ch_name}"}
@@ -888,7 +888,7 @@ async def _rename_channel(
 
     old_name = ch.name
     new_name = args["new_name"]
-    reason = args.get("reason") or f"Renamed by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Renamed by {author.display_name} via the Archivist"
     await ch.edit(name=new_name, reason=reason)
     return {"success": True, "result": f"Renamed #{old_name} → #{ch.name}"}
 
@@ -915,7 +915,7 @@ async def _edit_channel(
     if "nsfw" in args and isinstance(ch, (discord.TextChannel, discord.ForumChannel)):
         edit_kwargs["nsfw"] = bool(args["nsfw"])
 
-    reason = args.get("reason") or f"Edited by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Edited by {author.display_name} via the Archivist"
     await ch.edit(**edit_kwargs, reason=reason)
     return {"success": True, "result": f"Updated #{ch.name} settings: {list(edit_kwargs.keys())}"}
 
@@ -935,7 +935,7 @@ async def _create_category(
     if private:
         overwrites[guild.default_role] = discord.PermissionOverwrite(view_channel=False)
 
-    reason = args.get("reason") or f"Created by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Created by {author.display_name} via the Archivist"
     cat = await guild.create_category(args["name"], overwrites=overwrites, reason=reason)
     return {
         "success": True,
@@ -961,7 +961,7 @@ async def _set_channel_permissions(
 
     target_str = args["target"]
     target_type = args.get("target_type", "role")
-    reason = args.get("reason") or f"Permissions set by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Permissions set by {author.display_name} via the Archivist"
 
     if target_type == "role":
         if target_str.lower() in ("everyone", "@everyone", "all", "default"):
@@ -1004,7 +1004,7 @@ async def _create_role(
     if err:
         return {"error": err}
 
-    reason = args.get("reason") or f"Created by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Created by {author.display_name} via the Archivist"
     role = await guild.create_role(
         name=args["name"],
         color=_parse_color(args.get("color")),
@@ -1032,7 +1032,7 @@ async def _delete_role(
     if role.is_bot_managed() or role.is_integration() or role.is_premium_subscriber():
         return {"error": f"Can't delete '{role.name}' — it's a managed/integration role."}
 
-    reason = args.get("reason") or f"Deleted by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Deleted by {author.display_name} via the Archivist"
     role_name = role.name
     await role.delete(reason=reason)
     return {"success": True, "result": f"Deleted role '{role_name}'"}
@@ -1062,7 +1062,7 @@ async def _edit_role(
     if "mentionable" in args:
         edit_kwargs["mentionable"] = bool(args["mentionable"])
 
-    reason = args.get("reason") or f"Edited by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Edited by {author.display_name} via the Archivist"
     old_name = role.name
     await role.edit(**edit_kwargs, reason=reason)
     return {"success": True, "result": f"Updated role '{old_name}': {list(edit_kwargs.keys())}"}
@@ -1090,7 +1090,7 @@ async def _kick_member(
     if err:
         return {"error": err}
 
-    reason = args.get("reason") or f"Kicked by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Kicked by {author.display_name} via the Archivist"
     name = target.display_name
     await target.kick(reason=reason)
     return {"success": True, "result": f"Kicked {name} ({reason})"}
@@ -1113,7 +1113,7 @@ async def _ban_member(
     if err:
         return {"error": err}
 
-    reason = args.get("reason") or f"Banned by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Banned by {author.display_name} via the Archivist"
     delete_days = min(max(int(args.get("delete_message_days", 0)), 0), 7)
     name = target.display_name
     await target.ban(reason=reason, delete_message_days=delete_days)
@@ -1145,7 +1145,7 @@ async def _unban_member(
     if not target_user:
         return {"error": f"No banned user found matching: {user_str}"}
 
-    reason = args.get("reason") or f"Unbanned by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Unbanned by {author.display_name} via the Archivist"
     await guild.unban(target_user, reason=reason)
     return {"success": True, "result": f"Unbanned {target_user.name}"}
 
@@ -1170,7 +1170,7 @@ async def _timeout_member(
     duration_min = float(args["duration_minutes"])
     duration_min = min(duration_min, 40320)  # Discord max: 28 days
     until = discord.utils.utcnow() + timedelta(minutes=duration_min)
-    reason = args.get("reason") or f"Timed out by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Timed out by {author.display_name} via the Archivist"
     name = target.display_name
     await target.timeout(until, reason=reason)
 
@@ -1224,7 +1224,7 @@ async def _assign_role(
     if role >= bot.top_role:
         return {"error": f"Can't assign '{role.name}' — it's at or above my highest role."}
 
-    reason = args.get("reason") or f"Role assigned by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Role assigned by {author.display_name} via the Archivist"
     await target.add_roles(role, reason=reason)
     return {"success": True, "result": f"Gave '{role.name}' to {target.display_name}"}
 
@@ -1249,7 +1249,7 @@ async def _remove_role(
     if role >= bot.top_role:
         return {"error": f"Can't remove '{role.name}' — it's at or above my highest role."}
 
-    reason = args.get("reason") or f"Role removed by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Role removed by {author.display_name} via the Archivist"
     await target.remove_roles(role, reason=reason)
     return {"success": True, "result": f"Removed '{role.name}' from {target.display_name}"}
 
@@ -1341,7 +1341,7 @@ async def _bulk_delete_messages(
         return {"error": f"Text channel not found: {args['channel']}"}
 
     count = min(max(int(args.get("count", 10)), 1), 100)
-    reason = args.get("reason") or f"Bulk delete by {author.display_name} via Bob"
+    reason = args.get("reason") or f"Bulk delete by {author.display_name} via the Archivist"
 
     deleted = await ch.purge(limit=count, reason=reason)
     return {

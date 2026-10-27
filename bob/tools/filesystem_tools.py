@@ -175,7 +175,7 @@ async def read_workspace_file(args: dict, ctx: dict) -> dict:
     try:
         path = _resolve(str(args.get("path", "")), allow_root=False)
         if _sensitive(path):
-            return {"error": "Sensitive files cannot be read through Bob."}
+            return {"error": "Sensitive files cannot be read through the Archivist."}
         if not path.is_file():
             return {"error": f"File not found: {args.get('path')}"}
         limit = min(max(int(args.get("max_chars", 20000)), 1), 50000)
@@ -224,7 +224,7 @@ async def write_workspace_file(args: dict, ctx: dict) -> dict:
     try:
         path = _resolve(str(args.get("path", "")), allow_root=False)
         if _sensitive(path):
-            return {"error": "Sensitive files cannot be written through Bob."}
+            return {"error": "Sensitive files cannot be written through the Archivist."}
         content = str(args.get("content", ""))
         if len(content) > 200000:
             return {"error": "File content is limited to 200,000 characters."}
@@ -245,7 +245,7 @@ async def delete_workspace_file(args: dict, ctx: dict) -> dict:
     try:
         path = _resolve(str(args.get("path", "")), allow_root=False)
         if _sensitive(path):
-            return {"error": "Sensitive files cannot be deleted through Bob."}
+            return {"error": "Sensitive files cannot be deleted through the Archivist."}
         if not path.is_file():
             return {"error": f"File not found: {args.get('path')}"}
         await asyncio.to_thread(path.unlink)

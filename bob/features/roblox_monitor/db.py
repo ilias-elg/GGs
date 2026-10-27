@@ -1,8 +1,43 @@
-import aiosqlite
+import logging
+import os
+import shutil
 import time
+
+import aiosqlite
+
+import config
 from .config import PRESENCE_HISTORY_RETENTION_DAYS, ALERT_HISTORY_RETENTION_DAYS
 
-DB_PATH = "roblox_monitor.db"
+logger = logging.getLogger("discord")
+
+# Roblox scans, chat history and memories. Kept in the data folder with the
+# rest of the runtime state, so the bot's working directory holds only code.
+DB_PATH = os.path.join(config.DATA_DIR, "roblox_monitor.db")
+_LEGACY_DB_PATH = "roblox_monitor.db"
+
+
+def _move_legacy_db() -> str:
+    """
+    Older versions kept the database in the working directory. It is moved
+    once into the data folder; if that fails, the old location keeps being
+    used so no history is ever lost.
+    """
+    if os.path.exists(DB_PATH) or not os.path.exists(_LEGACY_DB_PATH):
+        return DB_PATH
+    try:
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            if os.path.exists(_LEGACY_DB_PATH + suffix):
+                shutil.move(_LEGACY_DB_PATH + suffix, DB_PATH + suffix)
+        logger.info(f"Moved {_LEGACY_DB_PATH} into {config.DATA_DIR}")
+        return DB_PATH
+    except OSError as e:
+        logger.warning(f"Could not move {_LEGACY_DB_PATH} into the data folder, using it where it is: {e}")
+        return _LEGACY_DB_PATH
+
+
+os.makedirs(config.DATA_DIR, exist_ok=True)
+DB_PATH = _move_legacy_db()
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:

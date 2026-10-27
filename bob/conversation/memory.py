@@ -312,32 +312,6 @@ async def save_user_memory(user_id: int, content: str, importance: int = 5) -> N
         await db.commit()
 
 
-async def delete_user_memory(user_id: int, content_fragment: str) -> bool:
-    """Delete a user memory matching a content fragment. Returns True if deleted."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT id FROM user_memories WHERE user_id = ? AND content LIKE ?",
-            (user_id, f"%{content_fragment}%"),
-        ) as cur:
-            row = await cur.fetchone()
-        if row:
-            await db.execute("DELETE FROM user_memories WHERE id = ?", (row[0],))
-            await db.commit()
-            return True
-    return False
-
-
-async def get_all_user_memories(user_id: int) -> list[str]:
-    """Return all memories for a user (for 'what do you remember about me?')."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT content FROM user_memories WHERE user_id = ? ORDER BY importance DESC",
-            (user_id,),
-        ) as cur:
-            rows = await cur.fetchall()
-    return [r[0] for r in rows]
-
-
 # ---------------------------------------------------------------------------
 # Server memories (guild-scoped persistent facts)
 # ---------------------------------------------------------------------------

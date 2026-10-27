@@ -64,7 +64,7 @@ async def run_google_checks(test_tts: bool, voice: str | None) -> tuple[list[Che
     """Returns the check lines and, when a test clip was generated, its WAV bytes."""
     api_key = config.GOOGLE_API_KEY
     if not api_key:
-        return [(False, "GOOGLE_API_KEY is not set → Bob can join voice but can't speak.")], None
+        return [(False, "GOOGLE_API_KEY is not set → the Archivist can join voice but can't speak.")], None
 
     lines: list[CheckLine] = []
     try:
@@ -132,7 +132,7 @@ def _channel_line(label: str, channel, me: discord.Member, needed: list[str], wh
     if not lacking:
         return True, f"{label} <#{channel.id}>: can {why}."
     return False, (
-        f"{label} <#{channel.id}>: missing **{_human(lacking)}** → give Bob's role those "
+        f"{label} <#{channel.id}>: missing **{_human(lacking)}** → give the Archivist's role those "
         "permissions on that channel."
     )
 
@@ -145,7 +145,7 @@ def run_discord_checks(guild: discord.Guild, current_channel, intents: discord.I
     if me.guild_permissions.administrator:
         lines.append((
             True,
-            "Bob has **Administrator** — server-wide permissions are all covered "
+            "The Archivist has **Administrator** — server-wide permissions are all covered "
             "(role-hierarchy limits below still apply).",
         ))
     else:
@@ -154,7 +154,7 @@ def run_discord_checks(guild: discord.Guild, current_channel, intents: discord.I
         lines.append(
             (True, "Core permissions (view, send, embeds, history, files): all granted.")
             if not lacking
-            else (False, f"Missing server-wide: **{_human(lacking)}** → add them to Bob's role in Server Settings → Roles.")
+            else (False, f"Missing server-wide: **{_human(lacking)}** → add them to the Archivist's role in Server Settings → Roles.")
         )
         lines.append(
             (True, "Manage Roles: granted (needed for /createhr, /createadvisor, /createroyalty).")
@@ -178,7 +178,7 @@ def run_discord_checks(guild: discord.Guild, current_channel, intents: discord.I
         if not log_channel:
             lines.append((
                 None,
-                "The audit log channel isn't in this server (it may be in another server Bob is in) — "
+                "The audit log channel isn't in this server (it may be in another server the Archivist is in) — "
                 "run /diagnostics there to check it.",
             ))
         else:
@@ -228,19 +228,19 @@ def run_discord_checks(guild: discord.Guild, current_channel, intents: discord.I
         if not role:
             lines.append((None, f'Role "{name}": doesn\'t exist in this server.'))
         elif me.top_role > role:
-            lines.append((True, f'Role "{name}": exists and sits below Bob\'s role (manageable).'))
+            lines.append((True, f'Role "{name}": exists and sits below the Archivist\'s role (manageable).'))
         else:
             lines.append((
                 None,
-                f'Role "{name}": exists but is above Bob\'s highest role → drag Bob\'s role above it '
-                "if Bob should ever assign it.",
+                f'Role "{name}": exists but is above the Archivist\'s highest role → drag the Archivist\'s role above it '
+                "if the Archivist should ever assign it.",
             ))
 
     # ── Who holds the top ranks ───────────────────────────────────────────────
     lines.append(
         (True, f"Owners configured: {len(config.OWNER_USER_IDS)}.")
         if config.OWNER_USER_IDS
-        else (False, "DISCORD_OWNER_USER_IDS is empty → nobody has owner rank, and only the Fire Lord and access list can talk to Bob.")
+        else (False, "DISCORD_OWNER_USER_IDS is empty → nobody has owner rank, and only the Fire Lord and access list can talk to the Archivist.")
     )
     return lines
 
@@ -283,7 +283,7 @@ def run_voice_runtime_checks() -> list[CheckLine]:
         lines.append((
             None,
             f"discord.py {discord.__version__}{'' if has_davey else ', davey not installed'} — Discord's voice "
-            "encryption (DAVE) needs discord.py 2.7+ with the davey package. If Bob can't connect to "
+            "encryption (DAVE) needs discord.py 2.7+ with the davey package. If the Archivist can't connect to "
             "voice, upgrade with `pip install -U \"discord.py[voice]\"`.",
         ))
     return lines

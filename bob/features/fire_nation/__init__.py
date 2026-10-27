@@ -29,8 +29,9 @@ async def setup(bot):
     greetings.load_greetings()
     orders.load_orders()
 
-    from .cog import FireNationCog
-    await bot.add_cog(FireNationCog(bot))
+    from .commands import COGS
+    for cog in COGS:
+        await bot.add_cog(cog(bot))
 
     # Graceful shutdown — leave voice and switch to the offline avatar before
     # the connection closes.
