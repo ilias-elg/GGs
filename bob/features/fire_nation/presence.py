@@ -18,8 +18,8 @@ import config
 
 logger = logging.getLogger("discord")
 
-SLEEP_PATTERN = re.compile(r"^bob[,]?\s+(?:go to sleep|good\s*night)[.!]?$", re.IGNORECASE)
-WAKE_UP_PATTERN = re.compile(r"^bob[,]?\s+wake up[.!]?$", re.IGNORECASE)
+SLEEP_PATTERN = re.compile(rf"^{config.CALL_NAME_PATTERN}[,]?\s+(?:go to sleep|good\s*night)[.!]?$", re.IGNORECASE)
+WAKE_UP_PATTERN = re.compile(rf"^{config.CALL_NAME_PATTERN}[,]?\s+wake up[.!]?$", re.IGNORECASE)
 
 AVATAR_ROTATION_SECONDS = 4 * 60 * 60
 

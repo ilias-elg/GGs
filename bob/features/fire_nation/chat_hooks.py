@@ -7,6 +7,8 @@ import logging
 
 import discord
 
+import config
+
 from bob.conversation import memory as mem
 
 from . import presence
@@ -32,7 +34,7 @@ async def handle_sleep_wake(message: discord.Message, bot) -> str | None:
             await presence.go_to_sleep(bot)
         except discord.HTTPException as e:
             logger.warning(f"Sleep: failed to fully go offline: {e}")
-        await message.reply('Night. Say "bob, wake up" when you need me back online.')
+        await message.reply(f'Night. Say "{config.CALL_NAME}, wake up" when you need me back online.')
         return "handled"
 
     if not presence.is_asleep():

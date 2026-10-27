@@ -26,8 +26,9 @@ MERIT_SCHEMAS: list[dict] = [
                 "(Advisor+ only) with a required host — the person who receives the merit for running it — "
                 "plus any participant usernames. Exams and events (not raids) can also have a cohost, who gets an "
                 "extra 0.5 on top of their participant merit — list them in usernames too if they took part. "
-                "For an 'exam', usernames are the guards, spectators and co-host only: never include the people who "
-                "passed or took the exam, they earn no merit."
+                "For an 'exam', usernames are the guards and co-host only: never include the people who "
+                "passed or took the exam, they earn no merit. Spectators of any exam/event/raid go in spectators, "
+                "not usernames: they get 1 merit each, whatever the activity pays."
             ),
             "parameters": {
                 "type": "object",
@@ -41,6 +42,11 @@ MERIT_SCHEMAS: list[dict] = [
                             "members receive the same amount. For 'exam'/'event'/'raid', these are additional "
                             "participants beyond the host; can be empty if only the host is being credited."
                         ),
+                    },
+                    "spectators": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional, 'exam'/'event'/'raid' only: people who spectated. 1 merit each.",
                     },
                     "host": {
                         "type": "string",
@@ -90,9 +96,13 @@ MERIT_SCHEMAS: list[dict] = [
         "function": {
             "name": "get_merits",
             "description": (
-                "Reports a specific member's total merit count, or the top-10 leaderboard if no username is given."
+                "Reports a member's current and all-time merit totals, or the top-10 leaderboard if no username "
+                "is given. The current leaderboard starts over at each reset; the all-time one never does."
             ),
-            "parameters": {"type": "object", "properties": {"username": {"type": "string"}}},
+            "parameters": {"type": "object", "properties": {
+                "username": {"type": "string"},
+                "all_time": {"type": "boolean", "description": "Leaderboard only: true for the all-time one."},
+            }},
         },
     },
     {
@@ -129,8 +139,8 @@ MERIT_SCHEMAS: list[dict] = [
         "function": {
             "name": "reset_merit_data",
             "description": (
-                "Permanently wipes all merit data after exporting a backup to the owner log channel. "
-                "DESTRUCTIVE. Owner/Fire Lord only. The user is asked to confirm before it runs."
+                "Resets everyone's current merits to 0 after exporting a backup to the owner log channel. The "
+                "all-time leaderboard keeps everything. Owner/Fire Lord only. The user is asked to confirm before it runs."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -376,22 +386,32 @@ async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: st
     recipients, not_found, ambiguous = _resolve_all(guild, usernames)
     if ambiguous:
         raise merit.MeritError(ambiguous)
+    spectator_names = args.get("spectators") if isinstance(args.get("spectators"), list) else []
+    watchers, spectators_not_found, ambiguous = _resolve_all(guild, spectator_names)
+    if ambiguous:
+        raise merit.MeritError(ambiguous)
+    not_found = [*not_found, *spectators_not_found]
+    # Listed as a participant too, or the host: they get the participant amount.
+    taking_part = {m.id for m in recipients} | {host.id}
+    watchers = [m for m in watchers if m.id not in taking_part]
     if cohost and (cohost.id == host.id or merit_type not in merit.COHOST_MERIT_TYPES):
         cohost = None
     if all(m.id != host.id for m in recipients):
         recipients.append(host)
-    for m in [*recipients, *([cohost] if cohost else [])]:
+    for m in [*recipients, *watchers, *([cohost] if cohost else [])]:
         merit.assert_not_protected_owner(actor_rank, m.id)
 
     amount = merit.fixed_merit_amount(merit_type)
     label = merit_type.capitalize()
-    awards = [(m, amount) for m in recipients]
+    awards = [(m, amount) for m in recipients] + [(m, merit.SPECTATOR_AMOUNT) for m in watchers]
     # The co-host bonus is extra: it stacks with the participant merit they
     # get from being listed among the participants.
     if cohost:
         awards.append((cohost, merit.COHOST_BONUS_AMOUNT))
     await merit.record_awards(guild.id, awards, f"{label} (conversational)", actor)
-    await merit.audit_award(bot, awards, label, actor, host=host, cohost=cohost)
+    await merit.audit_award(
+        bot, awards, label, actor, host=host, cohost=cohost, spectators=frozenset(m.id for m in watchers)
+    )
     cohost_note = ""
     if cohost:
         listed = any(m.id == cohost.id for m in recipients)
@@ -405,6 +425,11 @@ async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: st
         f"Recorded **+{merit.fmt_amount(amount)}** {merit_type} merit{merit.plural(amount)} for "
         f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'} (Host: {host})"
         f"{_not_found_note(not_found)} — logged for owners.{cohost_note}"
+        + (
+            f" Plus **+{merit.fmt_amount(merit.SPECTATOR_AMOUNT)}** each for **{len(watchers)}** "
+            f"spectator{'' if len(watchers) == 1 else 's'}."
+            if watchers else ""
+        )
     )
 
 
@@ -432,14 +457,19 @@ async def _get_merits(args: dict, message: discord.Message) -> str:
         if isinstance(target, str):
             raise merit.MeritError(target)
         total = await merit.get_member_total(target.id)
-        return f"{target} currently has **{merit.fmt_amount(total)}** merits."
-    leaderboard = await merit.get_leaderboard(10)
+        all_time = await merit.get_member_total(target.id, all_time=True)
+        return (
+            f"{target} currently has **{merit.fmt_amount(total)}** merits "
+            f"(**{merit.fmt_amount(all_time)}** all-time)."
+        )
+    all_time = args.get("all_time") is True
+    leaderboard = await merit.get_leaderboard(10, all_time=all_time)
     if not leaderboard:
-        return "No merits have been recorded yet."
+        return "No merits have been recorded yet." if all_time else "Nobody has earned merits since the last reset."
     lines = "\n".join(
         f"{i}. {e['member_tag']} — {merit.fmt_amount(e['total'])}" for i, e in enumerate(leaderboard, start=1)
     )
-    return f"Top personnel by merit:\n{lines}"
+    return f"Top personnel by {'all-time' if all_time else 'current'} merits:\n{lines}"
 
 
 async def _get_merit_history(args: dict, message: discord.Message, actor_rank: str) -> str:
@@ -491,7 +521,10 @@ async def _reset_merit_data(message: discord.Message, bot, actor_rank: str) -> s
     merit.assert_can_manage_data(actor_rank)
     entries = await merit.reset_all_data(message.guild.id)
     await merit.audit_reset(bot, entries, message.author)
-    return "All merit data has been reset. A full backup was logged to the owner channel first."
+    return (
+        "The current leaderboard has been reset — the all-time leaderboard is unchanged. "
+        "A backup of the current one was logged to the owner channel first."
+    )
 
 
 def _order_change(actor_rank: str, change) -> dict:

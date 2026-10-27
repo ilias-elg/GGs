@@ -70,7 +70,7 @@ LEADERBOARD_PAGE_SIZE = 15
 MERIT_HISTORY_PAGE_SIZE = 10
 
 
-def build_leaderboard_embed(rows: list[dict], page: int, total_pages: int) -> discord.Embed:
+def build_leaderboard_embed(rows: list[dict], page: int, total_pages: int, all_time: bool = False) -> discord.Embed:
     start = page * LEADERBOARD_PAGE_SIZE
     lines = [
         f"**{start + i + 1:02d}**  {row['member_tag'][:45]}  —  **{merit.fmt_amount(row['total'])}**"
@@ -78,7 +78,10 @@ def build_leaderboard_embed(rows: list[dict], page: int, total_pages: int) -> di
     ]
     embed = discord.Embed(
         title="FIRE NATION // MERIT COMMAND",
-        description="**FULL PERSONNEL RANKING**\n\n" + "\n".join(lines),
+        description=(
+            ("**ALL-TIME PERSONNEL RANKING**" if all_time else "**CURRENT PERSONNEL RANKING**")
+            + "\n\n" + "\n".join(lines)
+        ),
         color=config.FIRE_RED,
         timestamp=datetime.now(timezone.utc),
     )
@@ -173,7 +176,7 @@ class ResetConfirmView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.interaction.user.id
 
-    @discord.ui.button(label="Yes, Reset Everything", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Yes, Reset the Current Leaderboard", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.done = True
         self.stop()
@@ -183,7 +186,8 @@ class ResetConfirmView(discord.ui.View):
             entries = await merit.reset_all_data(interaction.guild.id)
             backup = await merit.audit_reset(self.bot, entries, interaction.user)
             await interaction.edit_original_response(
-                content="✅ **ALL MERIT DATA HAS BEEN RESET.**", embed=backup, view=None
+                content="✅ **THE CURRENT LEADERBOARD HAS BEEN RESET.** The all-time leaderboard is unchanged.",
+                embed=backup, view=None,
             )
         except Exception as e:
             logger.error(f"Error during merit data reset: {e}", exc_info=True)
@@ -291,12 +295,14 @@ class FireNationCog(commands.Cog):
         host: discord.Member,
         cohost: discord.Member | None,
         activity: str | None = None,
+        spectators: str | None = None,
     ) -> None:
         """
         exam / event / raid — the host plus everyone pinged in the announcement;
-        co-hosts (exam/event) get +0.5. `activity` names what was actually run
-        when it differs from the merit type: a training is recorded with the
-        event rules.
+        co-hosts (exam/event) get +0.5. Pings on the announcement's Spectators
+        line, or in `spectators`, get merit.SPECTATOR_AMOUNT instead.
+        `activity` names what was actually run when it differs from the merit
+        type: a training is recorded with the event rules.
         """
         activity = activity or merit_type
         await interaction.response.defer(ephemeral=True)
@@ -314,14 +320,17 @@ class FireNationCog(commands.Cog):
                 )
             # Exams and trainings only count certain lines of the pasted post:
             # passing an exam or winning a training round earns nothing.
-            if activity in conclusions.COUNTED_LINES:
-                mention_ids = extract_mention_ids(conclusions.counted_text_for(activity, announcement))
-            else:
-                mention_ids = extract_mention_ids(announcement)
-                if not mention_ids:
-                    raise merit.MeritError(
-                        "No @mentions found in the announcement. Make sure you pasted the full conclusion text."
-                    )
+            _, mention_ids, spectator_ids = conclusions.split_counted(
+                announcement, conclusions.labels_for(activity)
+            )
+            spectator_ids += [
+                i for i in extract_mention_ids(spectators or "") if i not in mention_ids and i not in spectator_ids
+            ]
+            spectator_ids = [i for i in spectator_ids if i != host.id]
+            if activity not in conclusions.COUNTED_LINES and not mention_ids and not spectator_ids:
+                raise merit.MeritError(
+                    "No @mentions found in the announcement. Make sure you pasted the full conclusion text."
+                )
             for lead, label in ((host, "host"), (cohost, "co-host")):
                 if lead is None:
                     continue
@@ -329,7 +338,7 @@ class FireNationCog(commands.Cog):
                     raise merit.MeritError(f"The specified {label} is not currently in the server.")
                 merit.assert_not_protected_owner(actor_rank, lead.id)
 
-            recipients = await _fetch_members(guild, mention_ids)
+            recipients = await _fetch_members(guild, mention_ids + spectator_ids)
             mentioned_count = len(recipients)
             for m in recipients:
                 merit.assert_not_protected_owner(actor_rank, m.id)
@@ -350,13 +359,17 @@ class FireNationCog(commands.Cog):
 
             amount = merit.fixed_merit_amount(merit_type)
             label = activity.capitalize()
-            awards = [(m, amount) for m in recipients]
+            watching = frozenset(spectator_ids)
+            awards = [(m, merit.SPECTATOR_AMOUNT if m.id in watching else amount) for m in recipients]
+            spectator_count = sum(1 for m in recipients if m.id in watching)
             # The co-host bonus is extra: it stacks with the participant merit
             # they get from being pinged in the announcement.
             if cohost:
                 awards.append((cohost, merit.COHOST_BONUS_AMOUNT))
             await merit.record_awards(guild.id, awards, proof, actor)
-            await merit.audit_award(self.bot, awards, label, actor, proof, host=host, cohost=cohost)
+            await merit.audit_award(
+                self.bot, awards, label, actor, proof, host=host, cohost=cohost, spectators=watching
+            )
 
             outside_note = (
                 f"\n• **{outside}** left out — not in the military server." if outside else ""
@@ -364,7 +377,7 @@ class FireNationCog(commands.Cog):
             exam_note = ""
             if activity in conclusions.COUNTED_LINES:
                 exam_note = f"\n• Only the {conclusions.COUNTED_LINES[activity][1]} lines were counted."
-                if not mention_ids:
+                if not mention_ids and not spectator_ids:
                     exam_note += " No pings were found on those lines, so only the host was credited."
             cohost_note = ""
             if cohost:
@@ -373,11 +386,17 @@ class FireNationCog(commands.Cog):
                     f"\n• **Co-host:** {cohost} — **+{merit.fmt_amount(merit.COHOST_BONUS_AMOUNT)}** bonus"
                     + ("" if pinged else " only (not pinged in the announcement, so no participant merit)")
                 )
+            participants = len(recipients) - spectator_count
+            spectator_note = (
+                f"\n• **{spectator_count}** spectator{'' if spectator_count == 1 else 's'} — "
+                f"**+{merit.fmt_amount(merit.SPECTATOR_AMOUNT)}** each"
+                if spectator_count else ""
+            )
             await interaction.edit_original_response(content=(
                 f"Recorded **+{merit.fmt_amount(amount)}** {label} merit{merit.plural(amount)} for "
-                f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'} (Host: {host})"
-                f"{_skipped_note(len(mention_ids) - mentioned_count)} — logged for owners."
-                f"{outside_note}{cohost_note}{exam_note}\n• **Proof:** <{proof}>"
+                f"**{participants}** member{'' if participants == 1 else 's'} (Host: {host})"
+                f"{_skipped_note(len(mention_ids) + len(spectator_ids) - mentioned_count)} — logged for owners."
+                f"{spectator_note}{outside_note}{cohost_note}{exam_note}\n• **Proof:** <{proof}>"
             ))
         except merit.MeritError as e:
             logger.warning(f"Merit award rejected for {actor.id}: {e}")
@@ -389,17 +408,18 @@ class FireNationCog(commands.Cog):
         proof="Discord message link as proof",
         host="The host who ran this exam — receives the merit.",
         cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",
+        spectators="Optional: @mention spectators not already on the post's Spectators line — 1 merit each.",
     )
     # Option names are deliberately not plain words like "host" or "proof":
     # Discord's command box treats "<option name>:" anywhere in pasted text as
     # the start of that option, so an announcement containing "co-host: @x"
     # used to get split across the fields.
-    @app_commands.rename(host="hosted_by", cohost="cohosted_by", proof="proof_link")
+    @app_commands.rename(host="hosted_by", cohost="cohosted_by", proof="proof_link", spectators="spectated_by")
     async def addmerit_exam(
         self, interaction: discord.Interaction, announcement: str, proof: str,
-        host: discord.Member, cohost: discord.Member | None = None,
+        host: discord.Member, cohost: discord.Member | None = None, spectators: str | None = None,
     ) -> None:
-        await self._award_activity(interaction, "exam", announcement, proof, host, cohost)
+        await self._award_activity(interaction, "exam", announcement, proof, host, cohost, spectators=spectators)
 
     @addmerit.command(
         name="training", description="Award 1 merit to the host, co-host, attendees and spectators. Paste the conclusion."
@@ -409,39 +429,45 @@ class FireNationCog(commands.Cog):
         proof="Discord message link as proof",
         host="The host who ran this training — receives the merit.",
         cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",
+        spectators="Optional: @mention spectators not already on the post's Spectators line — 1 merit each.",
     )
-    @app_commands.rename(host="hosted_by", cohost="cohosted_by", proof="proof_link")
+    @app_commands.rename(host="hosted_by", cohost="cohosted_by", proof="proof_link", spectators="spectated_by")
     async def addmerit_training(
         self, interaction: discord.Interaction, announcement: str, proof: str,
-        host: discord.Member, cohost: discord.Member | None = None,
+        host: discord.Member, cohost: discord.Member | None = None, spectators: str | None = None,
     ) -> None:
-        await self._award_activity(interaction, "event", announcement, proof, host, cohost, activity="training")
+        await self._award_activity(
+            interaction, "event", announcement, proof, host, cohost, activity="training", spectators=spectators
+        )
 
-    @addmerit.command(name="event", description="Award 1 merit to all participants. Paste the conclusion announcement.")
+    @addmerit.command(name="event", description="Award 1 merit to all participants and spectators. Paste the conclusion.")
     @app_commands.describe(
         announcement="Paste the full event conclusion — every @mention is extracted automatically.",
         proof="Discord message link as proof",
         host="The host who ran this event — receives the merit.",
         cohost="Optional co-host — gets an extra 0.5 on top of their participant merit.",
+        spectators="Optional: @mention spectators not already on the post's Spectators line — 1 merit each.",
     )
-    @app_commands.rename(host="hosted_by", cohost="cohosted_by", proof="proof_link")
+    @app_commands.rename(host="hosted_by", cohost="cohosted_by", proof="proof_link", spectators="spectated_by")
     async def addmerit_event(
         self, interaction: discord.Interaction, announcement: str, proof: str,
-        host: discord.Member, cohost: discord.Member | None = None,
+        host: discord.Member, cohost: discord.Member | None = None, spectators: str | None = None,
     ) -> None:
-        await self._award_activity(interaction, "event", announcement, proof, host, cohost)
+        await self._award_activity(interaction, "event", announcement, proof, host, cohost, spectators=spectators)
 
-    @addmerit.command(name="raid", description="Award 3 merits to all participants. Advisor and above only.")
+    @addmerit.command(name="raid", description="Award 3 merits to participants, 1 to spectators. Advisor and above only.")
     @app_commands.describe(
-        announcement="Paste the full raid conclusion — every @mention is extracted automatically.",
+        announcement="Paste the full raid conclusion — pings on the Spectators line get 1, everyone else 3.",
         proof="Discord message link as proof",
         host="The host who led this raid — receives the merit.",
+        spectators="Optional: @mention spectators not already on the post's Spectators line — 1 merit each.",
     )
-    @app_commands.rename(host="hosted_by", proof="proof_link")
+    @app_commands.rename(host="hosted_by", proof="proof_link", spectators="spectated_by")
     async def addmerit_raid(
         self, interaction: discord.Interaction, announcement: str, proof: str, host: discord.Member,
+        spectators: str | None = None,
     ) -> None:
-        await self._award_activity(interaction, "raid", announcement, proof, host, None)
+        await self._award_activity(interaction, "raid", announcement, proof, host, None, spectators=spectators)
 
     @addmerit.command(
         name="bonus", description="Award 0.1–50 bonus merits to one or more members. Advisor and above only."
@@ -518,14 +544,16 @@ class FireNationCog(commands.Cog):
 
     # ── /merits, /leaderboard, /merithistory ─────────────────────────────────
 
-    async def _send_leaderboard(self, interaction: discord.Interaction) -> None:
-        rows = await merit.get_leaderboard()
+    async def _send_leaderboard(self, interaction: discord.Interaction, all_time: bool = False) -> None:
+        rows = await merit.get_leaderboard(all_time=all_time)
         if not rows:
-            await interaction.edit_original_response(content="No merit data recorded yet.")
+            await interaction.edit_original_response(
+                content="No merit data recorded yet." if all_time else "Nobody has earned merits since the last reset."
+            )
             return
         await send_paged(
             interaction, len(rows), LEADERBOARD_PAGE_SIZE,
-            lambda page, total: build_leaderboard_embed(rows, page, total),
+            lambda page, total: build_leaderboard_embed(rows, page, total, all_time),
         )
 
     @app_commands.command(name="merits", description="View a member's merit total or the full leaderboard.")
@@ -537,20 +565,29 @@ class FireNationCog(commands.Cog):
             await self._send_leaderboard(interaction)
             return
         total = await merit.get_member_total(user.id)
+        all_time = await merit.get_member_total(user.id, all_time=True)
         embed = discord.Embed(
             title="FIRE NATION // MERIT INQUIRY",
-            description=f"**PERSONNEL:** {user}\n**RECORDED MERIT TOTAL:** **{merit.fmt_amount(total)}**",
+            description=(
+                f"**PERSONNEL:** {user}\n**CURRENT MERITS:** **{merit.fmt_amount(total)}**"
+                f"\n**ALL-TIME MERITS:** **{merit.fmt_amount(all_time)}**"
+            ),
             color=config.FIRE_RED,
             timestamp=datetime.now(timezone.utc),
         )
         embed.set_footer(text="FIRE NATION • MERIT SYSTEM • VERIFIED DATA")
         await interaction.edit_original_response(embed=embed)
 
-    @app_commands.command(name="leaderboard", description="View every member ranked by merit total.")
+    @app_commands.command(name="leaderboard", description="View every member ranked by merits — current or all-time.")
     @app_commands.guild_only()
-    async def leaderboard(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(board="Current (since the last reset, the default) or All Time (never reset).")
+    @app_commands.choices(board=[
+        app_commands.Choice(name="Current", value="current"),
+        app_commands.Choice(name="All Time", value="all_time"),
+    ])
+    async def leaderboard(self, interaction: discord.Interaction, board: str = "current") -> None:
         await interaction.response.defer()
-        await self._send_leaderboard(interaction)
+        await self._send_leaderboard(interaction, all_time=board == "all_time")
 
     @app_commands.command(name="merithistory", description="View a member's recent merit awards.")
     @app_commands.guild_only()
@@ -575,7 +612,9 @@ class FireNationCog(commands.Cog):
 
     # ── /resetdata ───────────────────────────────────────────────────────────
 
-    @app_commands.command(name="resetdata", description="Wipe all merit data. Exports a backup before resetting.")
+    @app_commands.command(
+        name="resetdata", description="Reset the current leaderboard. The all-time leaderboard is kept."
+    )
     @app_commands.guild_only()
     async def resetdata(self, interaction: discord.Interaction) -> None:
         if not can_manage(interaction.user):
@@ -584,7 +623,8 @@ class FireNationCog(commands.Cog):
             )
             return
         await interaction.response.send_message(
-            "⚠️ **ARE YOU SURE?** This permanently wipes all merit data. A full backup will be generated first.",
+            "⚠️ **ARE YOU SURE?** This sets everyone's **current** merits back to 0. The **all-time** "
+            "leaderboard keeps everything, and a backup of the current one is posted first.",
             view=ResetConfirmView(self.bot, interaction),
             ephemeral=True,
         )

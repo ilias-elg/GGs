@@ -254,6 +254,13 @@ class ConversationManager:
         # one at a time, preventing context corruption from concurrent requests.
         self._locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._pending_confirmations: dict[tuple[int, int], list[ToolCall]] = {}
+        # Replies being worked on (or waiting their turn) per channel, so
+        # "dismissed" can stop them on the spot, typing indicator included.
+        self._replies: dict[int, set[asyncio.Task]] = defaultdict(set)
+        # Replies in the middle of running a tool. Those are left to finish
+        # the tool, so an award or a role change is never cut in half, and
+        # are dropped straight after it.
+        self._in_tool: set[asyncio.Task] = set()
 
     @staticmethod
     def _is_confirmation(content: str, words: frozenset[str]) -> bool:
@@ -286,8 +293,31 @@ class ConversationManager:
         mem.add_to_history(message.channel.id, "assistant", answer)
         mem.activate_conversation(message.channel.id, message.author.id)
 
+    def stand_down(self, channel_id: int) -> int:
+        """Stops every reply in progress or queued in this channel. Returns how many were stopped."""
+        stopped = 0
+        for task in list(self._replies.get(channel_id, ())):
+            if task not in self._in_tool and not task.done():
+                task.cancel()
+                stopped += 1
+        for key in [k for k in self._pending_confirmations if k[0] == channel_id]:
+            self._pending_confirmations.pop(key, None)
+        return stopped
+
     async def handle(self, message: discord.Message, content: str) -> None:
         """Entry point — acquires per-channel lock, then runs the agent loop."""
+        task = asyncio.current_task()
+        replies = self._replies[message.channel.id]
+        replies.add(task)
+        try:
+            await self._handle(message, content)
+        except asyncio.CancelledError:
+            logger.info(f"Reply in channel {message.channel.id} stopped: dismissed")
+        finally:
+            replies.discard(task)
+            self._in_tool.discard(task)
+
+    async def _handle(self, message: discord.Message, content: str) -> None:
         channel_id = message.channel.id
         started = time.time()
         async with self._locks[channel_id]:
@@ -390,7 +420,11 @@ class ConversationManager:
                             mem.add_to_history(channel_id, "assistant", f"Confirmation requested: {prompt}")
                             return
                         logger.info(f"Executing tool: {tc.name} args={tc.arguments}")
-                        result = await execute_tool(tc.name, tc.arguments, tool_ctx)
+                        self._in_tool.add(asyncio.current_task())
+                        try:
+                            result = await execute_tool(tc.name, tc.arguments, tool_ctx)
+                        finally:
+                            self._in_tool.discard(asyncio.current_task())
                         logger.info(f"Tool result [{tc.name}]: {json.dumps(result)[:200]}")
 
                         if tc.name == "send_dashboard" and result.get("sent"):
@@ -462,7 +496,7 @@ class ConversationManager:
                 )
 
                 # ── Background tasks (non-blocking) ─────────────────────────
-                snippet = f"{username}: {content}\nBob: {answer}"
+                snippet = f"{username}: {content}\nGrand Archivist: {answer}"
                 # A one-liner has nothing in it worth an AI request to remember.
                 if config.MEMORY_ENABLED and len(content) >= 25:
                     asyncio.create_task(

@@ -4,7 +4,7 @@ The Discord client: startup, and deciding which messages Bob answers.
 Bob responds — only to the Owner, the Fire Lord and the standing-access
 list (see features/fire_nation/ranks.py) — to:
   - @mentions in any channel
-  - Messages containing "bob" (case-insensitive)
+  - Messages containing one of config.CALL_NAMES ("archivist", case-insensitive)
   - DMs
 
 No hardcoded channel IDs. Bot works server-wide.
@@ -123,17 +123,21 @@ def _is_addressed_to_bob(message: discord.Message) -> bool:
         return True
     # Name mention (case-insensitive, word boundary)
     content_lower = message.content.lower()
-    if re.search(r"\bbob\b", content_lower):
+    if _CALLED.search(content_lower):
         return True
     return False
 
 
-# Just his name, with or without a greeting: "bob", "hey bob?", "yo bob!".
-_NAME_ONLY = re.compile(r"^\W*(?:(?:hey|hi|yo|hello|ok|okay|oi|ay)\W+)?bob\W*$", re.IGNORECASE)
+_NAME = config.CALL_NAME_PATTERN
+_CALLED = re.compile(rf"\b{_NAME}\b", re.IGNORECASE)
+# Just his name, with or without a greeting: "archivist", "hey archivist?", "yo archivist!".
+_NAME_ONLY = re.compile(rf"^\W*(?:(?:hey|hi|yo|hello|ok|okay|oi|ay)\W+)?{_NAME}\W*$", re.IGNORECASE)
+# "hey archivist, ..." / "archivist, ..." in front of the actual request.
+_NAME_PREFIX = re.compile(rf"^(?:hey\s+{_NAME}\b,?|{_NAME}\s*,)\s*", re.IGNORECASE)
 
 
 def _clean_content(message: discord.Message) -> str:
-    """Remove @mention and 'hey bob' preamble from message content."""
+    """Remove @mention and 'hey archivist' preamble from message content."""
     content = message.content
     if bot.user:
         content = content.replace(f"<@{bot.user.id}>", "").strip()
@@ -145,11 +149,7 @@ def _clean_content(message: discord.Message) -> str:
     if _NAME_ONLY.match(content) and not message.attachments:
         return ""
 
-    lower = content.lower()
-    for prefix in ("hey bob,", "hey bob", "bob,"):
-        if lower.startswith(prefix):
-            content = content[len(prefix):].strip()
-            break
+    content = _NAME_PREFIX.sub("", content, count=1).strip()
 
     # Attach image URLs to content so the AI is aware of them
     if message.attachments:
@@ -164,7 +164,7 @@ def _clean_content(message: discord.Message) -> str:
 
 
 _DISMISSAL = re.compile(
-    r"^((ok(ay)?|please|bob)[, ]+)*(stop|quit)\b"
+    rf"^((ok(ay)?|please|{_NAME})[, ]+)*(stop|quit)\b"
     r"|\b(shut up|be quiet|go away|leave me alone|end (the )?conversation|never ?mind)\b"
     r"|\bthank(s| you)\b|\bthat'?(s|ll be) all\b|\bthat'?s enough\b|\bgood ?bye\b|\bbye\b"
     r"|\byou'?re free\b|\ball good\b",
@@ -172,7 +172,7 @@ _DISMISSAL = re.compile(
 )
 
 # Words that may sit around "dismissed" without making it a sentence about
-# something else: "ok bob, you're dismissed for now" is the order, "was he
+# something else: "ok archivist, you're dismissed for now" is the order, "was he
 # dismissed from the group?" is a question for the AI.
 _STAND_DOWN_FILLER = frozenset(
     "ok okay alright right bob you you're youre your ur u are r is be consider yourself now for "
@@ -187,7 +187,9 @@ def _is_stand_down(content: str) -> bool:
         return False
     words = re.findall(r"[a-z']+", content.lower().replace("’", "'"))
     orders = [w for w in words if w in ("dismissed", "dismiss")]
-    return bool(orders) and len(words) <= 10 and all(w in _STAND_DOWN_FILLER for w in words if w not in orders)
+    # His call names may be any words, so they count as filler too.
+    filler = _STAND_DOWN_FILLER | {w for name in config.CALL_NAMES for w in name.split()}
+    return bool(orders) and len(words) <= 10 and all(w in filler for w in words if w not in orders)
 
 
 def _is_dismissal(content: str) -> bool:
@@ -247,7 +249,7 @@ async def on_message(message: discord.Message):
         message.author.id,
     )
 
-    # "bob go to sleep" / "bob wake up" — while asleep, chat is ignored entirely.
+    # "archivist, go to sleep" / "archivist, wake up" — while asleep, chat is ignored entirely.
     from bob.features.fire_nation import chat_hooks
     sleep_state = await chat_hooks.handle_sleep_wake(message, bot)
     if sleep_state == "handled":
@@ -270,6 +272,9 @@ async def on_message(message: discord.Message):
         addressed and _is_dismissal(content)
     ):
         mem.end_conversation(message.channel.id)
+        # Cut off anything he is still typing, not just what he would send next.
+        if _manager is not None:
+            _manager.stand_down(message.channel.id)
         await message.reply("Understood. Standing down.")
         return
 

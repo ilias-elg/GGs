@@ -3,6 +3,7 @@ Central configuration — reads all environment variables in one place.
 Never import secrets from here into AI context.
 """
 import os
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,6 +22,18 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 
 # ─── Conversation ─────────────────────────────────────────────────────────────
+# What people call him in chat to get his attention ("archivist, how many air
+# are on?"), comma-separated. @mentions and DMs always work as well.
+CALL_NAMES: list[str] = [
+    n.strip().lower() for n in os.getenv("BOT_CALL_NAMES", "grand archivist,archivist").split(",") if n.strip()
+]
+# The same names as one regex alternative, longest first, any spacing allowed.
+CALL_NAME_PATTERN: str = "(?:" + "|".join(
+    r"\s+".join(re.escape(word) for word in name.split())
+    for name in sorted(CALL_NAMES or ["archivist"], key=len, reverse=True)
+) + ")"
+# How replies refer to calling him, e.g. 'say "archivist, join vc"'.
+CALL_NAME: str = (CALL_NAMES or ["archivist"])[-1]
 MAX_CONTEXT_MESSAGES: int = int(os.getenv("MAX_CONTEXT_MESSAGES", "5"))
 MAX_TOOL_ROUNDS: int = int(os.getenv("MAX_TOOL_ROUNDS", "5"))
 MEMORY_ENABLED: bool = os.getenv("MEMORY_ENABLED", "true").lower() == "true"

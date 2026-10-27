@@ -43,6 +43,10 @@ def fixed_merit_amount(merit_type: str) -> float:
 # Exams and events only: a co-host earns this on top of the participant merit
 # they get for being pinged in the announcement.
 COHOST_BONUS_AMOUNT = 0.5
+# Watching an exam, training, event or raid is worth this, whatever the
+# activity itself pays. Someone listed as both a participant and a
+# spectator gets the participant amount.
+SPECTATOR_AMOUNT = 1
 COHOST_MERIT_TYPES = ("exam", "event")
 
 
@@ -159,6 +163,11 @@ async def ensure_merit_tables() -> None:
                 archived_at timestamp with time zone DEFAULT now() NOT NULL
             )
         """)
+        # /resetdata no longer deletes anything: it stamps every current row
+        # with the time of the reset. Rows with no stamp make up the current
+        # leaderboard; every row, stamped or not, makes up the all-time one.
+        for table in ("merit_awards", "merit_awards_archive"):
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS reset_at timestamp with time zone")
 
 
 _INSERT = (
@@ -221,23 +230,34 @@ async def record_removal(
         )
 
 
-async def get_member_total(member_id: int) -> float:
-    """Merit is one shared ledger across every server the bot is in — not filtered by guild."""
+_CURRENT = "reset_at IS NULL"
+
+
+async def get_member_total(member_id: int, all_time: bool = False) -> float:
+    """
+    Merit is one shared ledger across every server the bot is in — not filtered
+    by guild. The current total counts only what was earned since the last
+    /resetdata; the all-time total counts everything.
+    """
     pool = await get_pool()
     async with pool.acquire() as db:
         total = await db.fetchval(
-            "SELECT COALESCE(SUM(amount), 0) FROM merit_awards WHERE member_id = $1", str(member_id)
+            "SELECT COALESCE(SUM(amount), 0) FROM merit_awards WHERE member_id = $1"
+            + ("" if all_time else f" AND {_CURRENT}"),
+            str(member_id),
         )
     return round(float(total), 1)
 
 
-async def get_leaderboard(limit: int | None = None) -> list[dict]:
+async def get_leaderboard(limit: int | None = None, all_time: bool = False) -> list[dict]:
     # Grouping by member_id alone (and taking the most recently recorded tag)
     # avoids splitting one person into two leaderboard lines whenever they
     # change their Discord username.
     query = (
         "SELECT member_id, (array_agg(member_tag ORDER BY created_at DESC))[1] AS member_tag, "
-        "SUM(amount) AS total FROM merit_awards GROUP BY member_id ORDER BY SUM(amount) DESC"
+        "SUM(amount) AS total FROM merit_awards"
+        + ("" if all_time else f" WHERE {_CURRENT}")
+        + " GROUP BY member_id ORDER BY SUM(amount) DESC"
     )
     pool = await get_pool()
     async with pool.acquire() as db:
@@ -331,9 +351,9 @@ async def archive_members(member_ids: list[int]) -> None:
         async with db.transaction():
             await db.execute(
                 "INSERT INTO merit_awards_archive (id, guild_id, member_id, member_tag, amount, proof_url, "
-                "awarded_by_id, awarded_by_tag, created_at) "
+                "awarded_by_id, awarded_by_tag, created_at, reset_at) "
                 "SELECT id, guild_id, member_id, member_tag, amount, proof_url, awarded_by_id, awarded_by_tag, "
-                "created_at FROM merit_awards WHERE member_id = ANY($1::text[])",
+                "created_at, reset_at FROM merit_awards WHERE member_id = ANY($1::text[])",
                 ids,
             )
             await db.execute("DELETE FROM merit_awards WHERE member_id = ANY($1::text[])", ids)
@@ -354,7 +374,9 @@ async def prune_departed_members(bot: discord.Client) -> list[dict]:
         await guild.chunk()
 
     departed = []
-    for entry in await get_leaderboard():
+    # Everyone with any record at all, so someone who left keeps nothing on
+    # either leaderboard.
+    for entry in await get_leaderboard(all_time=True):
         if guild.get_member(entry["member_id"]):
             continue
         # The cache says they're gone; ask Discord directly before acting on it.
@@ -371,14 +393,16 @@ async def prune_departed_members(bot: discord.Client) -> list[dict]:
 
 async def reset_all_data(guild_id: int) -> list[dict]:
     """
-    Deletes every merit record (all servers) and returns the final leaderboard
-    as a backup. Callers are responsible for confirming with the user first.
+    Starts the current leaderboard over (all servers) and returns it as it
+    stood, as a backup. Nothing is deleted: the rows are stamped with the
+    reset time and stay on the all-time leaderboard. Callers are responsible
+    for confirming with the user first.
     """
     entries = await get_leaderboard()
     pool = await get_pool()
     async with pool.acquire() as db:
-        await db.execute("DELETE FROM merit_awards")
-    logger.info(f"Merit data reset from guild {guild_id} — {len(entries)} members exported")
+        await db.execute(f"UPDATE merit_awards SET reset_at = now() WHERE {_CURRENT}")
+    logger.info(f"Current merit leaderboard reset from guild {guild_id} — {len(entries)} members exported")
     return entries
 
 
@@ -431,6 +455,15 @@ def _chunk_lines(lines: list[str], limit: int = 1024) -> list[str]:
     return chunks
 
 
+def role_tag(member_id: int, host_id, cohost_id, spectators) -> str:
+    """The " · host" / " · co-host" / " · spectator" marker on a recipient line."""
+    if member_id == host_id:
+        return " · **host**"
+    if member_id == cohost_id:
+        return " · **co-host**"
+    return " · spectator" if member_id in spectators else ""
+
+
 async def audit_award(
     bot: discord.Client,
     awards: list[tuple[discord.Member, float]],
@@ -440,8 +473,9 @@ async def audit_award(
     host: discord.Member | None = None,
     cohost: discord.Member | None = None,
     reason: str | None = None,
+    spectators: set[int] | frozenset[int] = frozenset(),
 ) -> None:
-    """One embed per action: who got how much in total, with the host and co-host marked."""
+    """One embed per action: who got how much in total, with the host, co-host and spectators marked."""
     channel = await _fetch_log_channel(bot)
     if not channel:
         return
@@ -454,8 +488,9 @@ async def audit_award(
     host_id, cohost_id = getattr(host, "id", None), getattr(cohost, "id", None)
 
     def line(member_id: int) -> str:
-        role = " · **host**" if member_id == host_id else " · **co-host**" if member_id == cohost_id else ""
-        return f"`+{fmt_amount(totals[member_id]):<3}` {_who(members[member_id])}{role}"
+        return f"`+{fmt_amount(totals[member_id]):<3}` {_who(members[member_id])}" + role_tag(
+            member_id, host_id, cohost_id, spectators
+        )
 
     # Host first, then co-host, then everyone else by name.
     order = sorted(
@@ -548,8 +583,11 @@ async def audit_reset(
     ) or "No data recorded prior to reset."
 
     embed = discord.Embed(
-        title="FIRE NATION // SYSTEM DATA BACKUP & RESET EXPORT",
-        description=f"**DATA BACKUP AT RESET**\n\n{backup_lines[:4000]}",
+        title="FIRE NATION // CURRENT LEADERBOARD RESET",
+        description=(
+            "**CURRENT LEADERBOARD AT RESET** — the all-time leaderboard keeps all of it.\n\n"
+            f"{backup_lines[:3900]}"
+        ),
         color=config.FIRE_RED,
         timestamp=datetime.now(timezone.utc),
     )

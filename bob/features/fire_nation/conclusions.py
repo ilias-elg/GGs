@@ -33,16 +33,22 @@ _TITLE_NOISE = re.compile(r"<a?:\w+:\d+>|[#*_`『』]")
 # (keyword, merit type whose rules apply, name shown on the card, the labelled
 # lines whose pings earn the merit — None means every ping in the post)
 _COHOST = r"co[\s-]?host"
-_EXAM_LABELS = rf"{_COHOST}|guards?|spectators?"
-_TRAINING_LABELS = rf"{_COHOST}|attendees?|spectators?"
+_EXAM_LABELS = rf"{_COHOST}|guards?"
+_TRAINING_LABELS = rf"{_COHOST}|attendees?"
+# Any conclusion can have a "Spectators:" line. Those pings get
+# merit.SPECTATOR_AMOUNT instead of what the activity pays.
+_SPECTATOR_LABELS = r"spectators?|spectating"
 # Hosts also write the same thing as a sentence — "Thanks to @a @b for
 # spectating", "Shoutout to @c for guarding" — so the pings before these
 # phrases count exactly like the labelled line would.
 _SENTENCE_ROLES = {
-    _EXAM_LABELS: r"co[\s-]?hosting|hosting with (?:me|us)|guarding|spectating",
-    _TRAINING_LABELS: r"co[\s-]?hosting|hosting with (?:me|us)|spectating|coming|attending|participating",
+    _EXAM_LABELS: r"co[\s-]?hosting|hosting with (?:me|us)|guarding",
+    _TRAINING_LABELS: r"co[\s-]?hosting|hosting with (?:me|us)|coming|attending|participating",
+    _SPECTATOR_LABELS: r"spectating",
 }
+_SPECTATING_SENTENCE = re.compile(r"[^.!?\n]*\bfor\s+spectating\b", re.IGNORECASE)
 # For /addmerit, which reads the same lines: activity → (labels, how to name them in a reply).
+# Raids and events count every ping, so they have no entry.
 COUNTED_LINES = {
     "exam": (_EXAM_LABELS, "**Co-host**, **Guards** and **Spectators**"),
     "training": (_TRAINING_LABELS, "**Co-host**, **Attendees** and **Spectators**"),
@@ -81,6 +87,7 @@ class Plan:
     awards: list[tuple[discord.Member, float]]
     skipped: int
     outside: int = 0
+    spectators: frozenset[int] = frozenset()
 
 
 def read_title(content: str) -> tuple[str, str, str | None, str] | None:
@@ -105,16 +112,7 @@ def counted_text(content: str, labels: str) -> str:
     where the whole post arrives as a single line. Sentences such as
     "Thanks to @a @b for spectating" are kept too, rewritten as a labelled line.
     """
-    counted = re.compile(rf"\b(?:{labels})\b", re.IGNORECASE)
-    found = list(_LABEL.finditer(content))
-    kept = []
-    for index, label in enumerate(found):
-        name = label["bold"] or label["plain"]
-        if not counted.search(name):
-            continue
-        end = found[index + 1].start() if index + 1 < len(found) else len(content)
-        section = re.split(r"\n\s*\n", content[label.end():end], maxsplit=1)[0]
-        kept.append(f"{name}: {' '.join(section.split())}")
+    kept = [f"{name}: {' '.join(content[start:end].split())}" for name, _, start, end in _sections(content, labels)]
 
     roles = _SENTENCE_ROLES.get(labels)
     if roles:
@@ -131,9 +129,47 @@ def counted_text(content: str, labels: str) -> str:
     return "\n".join(kept)
 
 
-def counted_text_for(activity: str, content: str) -> str:
-    """The part of an exam or training post whose pings earn the merit — for /addmerit."""
-    return counted_text(content, COUNTED_LINES[activity][0])
+def _sections(content: str, labels: str) -> list[tuple[str, int, int, int]]:
+    """(label, label start, text start, text end) for each section whose label matches `labels`."""
+    counted = re.compile(rf"\b(?:{labels})\b", re.IGNORECASE)
+    found = list(_LABEL.finditer(content))
+    sections = []
+    for index, label in enumerate(found):
+        name = label["bold"] or label["plain"]
+        if not counted.search(name):
+            continue
+        end = found[index + 1].start() if index + 1 < len(found) else len(content)
+        section = re.split(r"\n\s*\n", content[label.end():end], maxsplit=1)[0]
+        sections.append((name, label.start(), label.end(), label.end() + len(section)))
+    return sections
+
+
+def _ids(text: str) -> list[int]:
+    return list(dict.fromkeys(int(i) for i in _MENTION.findall(text)))
+
+
+def split_counted(content: str, labels: str | None) -> tuple[str, list[int], list[int]]:
+    """
+    (participant text, participant IDs, spectator IDs) for a conclusion.
+    `labels` are the lines whose pings take part (exams, trainings); None
+    means every ping outside the Spectators line (raids, events). Someone on
+    both lists counts as a participant.
+    """
+    if labels:
+        participant_text = counted_text(content, labels)
+    else:
+        participant_text = content
+        for _, start, _, end in reversed(_sections(content, _SPECTATOR_LABELS)):
+            participant_text = participant_text[:start] + "\n" + participant_text[end:]
+        participant_text = _SPECTATING_SENTENCE.sub("", participant_text)
+    participants = _ids(participant_text)
+    spectators = [i for i in _ids(counted_text(content, _SPECTATOR_LABELS)) if i not in participants]
+    return participant_text, participants, spectators
+
+
+def labels_for(activity: str) -> str | None:
+    """The participant lines /addmerit counts for an activity — None for every ping."""
+    return COUNTED_LINES[activity][0] if activity in COUNTED_LINES else None
 
 
 async def _member(guild: discord.Guild, user_id: int) -> discord.Member | None:
@@ -155,9 +191,11 @@ async def build_plan(bot: discord.Client, message: discord.Message) -> Plan | No
         return None
     merit_type, label, counted, title_text = title
     host = message.author
-    content = counted_text(message.content, counted) if counted else message.content
+    content, participant_ids, spectator_ids = split_counted(message.content, counted)
+    # The host is credited as the host, even if they also wrote themselves under Spectators.
+    spectator_ids = [i for i in spectator_ids if i != host.id]
 
-    mention_ids = list(dict.fromkeys(int(i) for i in _MENTION.findall(content)))
+    mention_ids = participant_ids + spectator_ids
     found = [await _member(message.guild, user_id) for user_id in mention_ids]
     recipients = [m for m in found if m and not m.bot]
     # The host always receives the merit, pinged in their own post or not.
@@ -173,8 +211,8 @@ async def build_plan(bot: discord.Client, message: discord.Message) -> Plan | No
         for line in content.splitlines():
             # The co-host is the first person pinged after the word itself, so
             # "thanks @a @b and co-host @c" picks c, not a.
-            label = _COHOST_LINE.search(line)
-            ids = _MENTION.findall(line[label.end():]) if label else []
+            marker = _COHOST_LINE.search(line)
+            ids = _MENTION.findall(line[marker.end():]) if marker else []
             if ids:
                 cohost = next((m for m in recipients if m.id == int(ids[0])), None)
                 break
@@ -182,12 +220,13 @@ async def build_plan(bot: discord.Client, message: discord.Message) -> Plan | No
             cohost = None
 
     amount = merit.fixed_merit_amount(merit_type)
-    awards = [(m, amount) for m in recipients]
+    watching = frozenset(spectator_ids)
+    awards = [(m, merit.SPECTATOR_AMOUNT if m.id in watching else amount) for m in recipients]
     if cohost:
         awards.append((cohost, merit.COHOST_BONUS_AMOUNT))
     return Plan(
         merit_type, label, title_text, host, cohost, awards,
-        len(mention_ids) - len([m for m in found if m]), outside,
+        len(mention_ids) - len([m for m in found if m]), outside, watching,
     )
 
 
@@ -201,7 +240,7 @@ def _card(plan: Plan, message: discord.Message, heading: str, color: int) -> dis
     order = sorted(totals, key=lambda i: (i != host_id, i != cohost_id, str(members[i]).lower()))
     lines = [
         f"`+{merit.fmt_amount(totals[i]):<3}` {merit._who(members[i])}"
-        + (" · **host**" if i == host_id else " · **co-host**" if i == cohost_id else "")
+        + merit.role_tag(i, host_id, cohost_id, plan.spectators)
         for i in order
     ]
     grand_total = sum(totals.values())

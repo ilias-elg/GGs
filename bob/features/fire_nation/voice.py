@@ -104,7 +104,7 @@ async def say_in_voice(vm, member: discord.Member, text: str, tone: str | None =
     """
     guild = voice_guild_for(vm, member)
     if not vm.current_channel(guild):
-        return 'I\'m not in a voice channel — say "bob, join vc" or use `/voice join` first.'
+        return f'I\'m not in a voice channel — say "{config.CALL_NAME}, join vc" or use `/voice join` first.'
     chosen, spoken = tone_feature.tone_for(text, tone)
     # Mentions are looked up where the text was typed — that is the server they belong to.
     line = clean_for_speech(spoken, member.guild)
@@ -137,7 +137,7 @@ def voice_status_report(vm, guild: discord.Guild, member: discord.Member | None 
 
 # ─── Chat phrases (handled before the AI — no tokens spent) ──────────────────
 
-_NAME = r"(?:bob[,]?\s+)?"
+_NAME = rf"(?:{config.CALL_NAME_PATTERN}[,]?\s+)?"
 _JOIN = re.compile(
     rf"^{_NAME}(?:join|hop in(?:to)?|get in(?:to)?|come to)\s+(?:the\s+|my\s+)?(?:vc|voice(?: chat| channel)?|call)\b[.!]?$",
     re.IGNORECASE,
