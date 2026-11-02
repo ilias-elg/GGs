@@ -388,11 +388,19 @@ async def _offer_new_raids(bot: discord.Client, feed: dict) -> tuple[int, bool]:
     raids = [r for r in feed["raids"] if isinstance(r, dict) and r.get("id")]
     seen = await _seen_ids()
     if not seen:
-        # First run: everything already on the site predates this feature and
-        # was handled by hand, so none of it is offered again.
-        await _mark_seen([r["id"] for r in raids])
-        logger.info(f"Raid results feed connected — {len(raids)} existing raid(s) marked as already handled.")
-        return 0, True
+        # First run: the raids already on the site were handled by hand,
+        # except the most recent one Fire fought in, which is offered now.
+        fire_raids = sorted((r for r in raids if fire_side(r)), key=lambda r: str(r.get("createdAt", "")))
+        latest = fire_raids[-1]["id"] if fire_raids else None
+        older = [r["id"] for r in raids if r["id"] != latest]
+        await _mark_seen(older)
+        logger.info(
+            f"Raid results feed connected — {len(older)} earlier raid(s) marked as already handled"
+            + (f", offering the latest ({latest})." if latest else ".")
+        )
+        if latest is None:
+            return 0, True
+        seen = set(older)
 
     channel = await merit._fetch_log_channel(bot)
     posted, complete = 0, True
