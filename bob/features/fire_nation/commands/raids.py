@@ -27,7 +27,7 @@ class RaidResultsCommands(FireNationCog):
     async def cog_unload(self) -> None:
         self.poll_raids.cancel()
 
-    @tasks.loop(seconds=120)
+    @tasks.loop(seconds=60)
     async def poll_raids(self) -> None:
         try:
             posted = await website_raids.check_for_new_raids(self.bot)

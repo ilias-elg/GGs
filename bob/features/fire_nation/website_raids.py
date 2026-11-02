@@ -4,8 +4,9 @@ Raid merits from the Fire Nation website's raid results.
 The website's feed (config.RAID_RESULTS_API_URL) lists every raid with each
 player's Roblox username and side. For each new raid Fire fought in, the
 Archivist posts a card in the owner log channel: every Fire player on Fire's
-side who can be matched to a member of the home server gets the raid merit
-once someone with the rank approves.
+side who can be matched to a member of the home server gets 1 merit for
+attending, +1 if Fire won, once someone with the rank approves. The feed is
+only read when the site reports it changed (ETag / 304 Not Modified).
 
 Roblox names are matched to Discord members by their nickname, display name
 or username (any word in it, so "vShadeXII | BST" matches vShadeXII), or by a
@@ -35,17 +36,36 @@ _WORD_SPLIT = re.compile(r"[\s|\[\](){}/\\,@•·]+")
 # Two people pressing Approve at once must not both get past the duplicate check.
 _approval_lock = asyncio.Lock()
 
+# Website raids pay for turning up, plus a point if Fire won.
+ATTENDANCE_AMOUNT = 1
+WIN_AMOUNT = 1
+
+# The feed's ETag from the last check. The site answers "304 Not Modified"
+# with no body while nothing has changed, so between raids a check costs
+# next to nothing and nothing is processed.
+_etag: str | None = None
+
 
 # ─── The feed ─────────────────────────────────────────────────────────────────
 
 
-async def fetch_feed() -> dict | None:
-    """The website's raid feed, or None when it can't be read or is serving stale data."""
+async def fetch_feed(only_if_changed: bool = False) -> dict | None:
+    """
+    The website's raid feed, or None when it can't be read or is serving
+    stale data. With `only_if_changed`, also None when nothing has changed
+    since the last check.
+    """
+    global _etag
     if not config.RAID_RESULTS_API_URL:
         return None
+    headers = {"User-Agent": "FireNationArchivist/1.0"}
+    if only_if_changed and _etag:
+        headers["If-None-Match"] = _etag
     try:
-        async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "FireNationArchivist/1.0"}) as client:
+        async with httpx.AsyncClient(timeout=15, headers=headers) as client:
             res = await client.get(config.RAID_RESULTS_API_URL)
+        if res.status_code == 304:
+            return None
         res.raise_for_status()
         data = res.json()
     except (httpx.HTTPError, ValueError) as e:
@@ -57,7 +77,20 @@ async def fetch_feed() -> dict | None:
     if data.get("stale"):
         # The site couldn't reach its own source and is showing old results.
         return None
+    if only_if_changed:
+        # Remembered only once the new results were read successfully, so a
+        # failed check is simply repeated next time.
+        _etag = res.headers.get("ETag")
     return data
+
+
+def fire_won(raid: dict) -> bool:
+    return raid.get("winner") == fire_side(raid)
+
+
+def raid_amount(raid: dict) -> float:
+    """1 for attending, +1 when Fire won."""
+    return ATTENDANCE_AMOUNT + (WIN_AMOUNT if fire_won(raid) else 0)
 
 
 def proof_url(raid_id: str) -> str:
@@ -189,7 +222,7 @@ async def build_plan(bot: discord.Client, raid: dict, feed: dict) -> RaidPlan | 
     if not guild.chunked:
         await guild.chunk()
     matched, unmatched = match_members(guild, names, await get_links())
-    amount = merit.fixed_merit_amount("raid")
+    amount = raid_amount(raid)
     plan = RaidPlan(raid, _title(raid), unmatched=unmatched)
     seen: set[int] = set()
     for name, member in matched.items():
@@ -208,6 +241,7 @@ def card(plan: RaidPlan, heading: str, color: int) -> discord.Embed:
     embed = merit._audit_embed(
         heading,
         f"**{plan.title}**\n{raid.get('gamemode') or 'Raid'} · {minutes}m · "
+        f"{ATTENDANCE_AMOUNT} for attending" + (f" + {WIN_AMOUNT} for the win" if fire_won(raid) else "") + " · "
         f"<t:{_timestamp(raid)}:f>\n**{len(plan.awards)}** member{'' if len(plan.awards) == 1 else 's'} · "
         f"**{merit.fmt_amount(total)}** merit{merit.plural(total)} in total",
         color,
@@ -331,10 +365,26 @@ async def _mark_seen(raid_ids: list[str]) -> None:
 
 
 async def check_for_new_raids(bot: discord.Client) -> int:
-    """Posts a card for each raid not seen before. Returns how many cards were posted."""
-    feed = await fetch_feed()
+    """
+    Posts a card for each raid not seen before. Returns how many cards were
+    posted. Does nothing at all while the website's results are unchanged.
+    """
+    global _etag
+    feed = await fetch_feed(only_if_changed=True)
     if feed is None:
         return 0
+    try:
+        posted, complete = await _offer_new_raids(bot, feed)
+    except Exception:
+        _etag = None  # read these results again next time
+        raise
+    if not complete:
+        _etag = None  # something couldn't be posted yet; look again next time
+    return posted
+
+
+async def _offer_new_raids(bot: discord.Client, feed: dict) -> tuple[int, bool]:
+    """(cards posted, whether every new raid was dealt with)."""
     raids = [r for r in feed["raids"] if isinstance(r, dict) and r.get("id")]
     seen = await _seen_ids()
     if not seen:
@@ -342,14 +392,17 @@ async def check_for_new_raids(bot: discord.Client) -> int:
         # was handled by hand, so none of it is offered again.
         await _mark_seen([r["id"] for r in raids])
         logger.info(f"Raid results feed connected — {len(raids)} existing raid(s) marked as already handled.")
-        return 0
+        return 0, True
 
     channel = await merit._fetch_log_channel(bot)
-    posted = 0
+    posted, complete = 0, True
     # Oldest first, so the cards arrive in the order the raids happened.
     for raid in sorted((r for r in raids if r["id"] not in seen), key=lambda r: str(r.get("createdAt", ""))):
+        if fire_side(raid) and (channel is None or bot.get_guild(config.MERIT_HOME_GUILD_ID) is None):
+            complete = False  # can't post or match yet
+            continue
         plan = await build_plan(bot, raid, feed) if fire_side(raid) else None
-        if plan is not None and channel is not None and (plan.awards or plan.unmatched):
+        if plan is not None and (plan.awards or plan.unmatched):
             view = discord.ui.View(timeout=None)
             view.add_item(WebsiteRaidButton("approve", raid["id"]))
             view.add_item(WebsiteRaidButton("reject", raid["id"]))
@@ -358,8 +411,7 @@ async def check_for_new_raids(bot: discord.Client) -> int:
                 posted += 1
             except discord.HTTPException as e:
                 logger.error(f"Website raid card send failed: {e}")
-                continue  # not marked seen, so it is tried again next time
-        elif fire_side(raid) and (channel is None or bot.get_guild(config.MERIT_HOME_GUILD_ID) is None):
-            continue  # can't post or match yet; try again next time
+                complete = False  # not marked seen, so it is offered again
+                continue
         await _mark_seen([raid["id"]])
-    return posted
+    return posted, complete

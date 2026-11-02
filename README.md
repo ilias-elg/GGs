@@ -89,7 +89,7 @@ Ranks: Owner and Fire Lord come from the user IDs below; Royalty, Advisor and HR
 
 Any post can also have a `Spectators:` line (or "thanks @a @b for spectating"): those people get **1 merit** whatever the activity pays. The person pinged after "Co-host" gets +0.5 on top. Anyone who is not a member of the home server is left out. `/addmerit` reads the pasted conclusion the same way, and its `spectated_by` option adds spectators that are not on the post.
 
-**Website raids.** Every 2 minutes he reads the raid results feed (`RAID_RESULTS_API_URL`, the Fire Nation website's `/api/raids`). Each new raid Fire fought in becomes an approval card in the owner log channel: every Fire player on Fire's side gets the raid merit (3) once an Advisor or above approves; in an alliance only Fire's own players count. Roblox names are matched to Fire Nation Military members by any word of their nickname, display name or username; players who match nobody (or more than one person) are listed on the card instead. `/robloxlink set roblox_name member` (HR+) links a Roblox name that differs from someone's Discord name — approving re-reads the raid, so linking before approving is enough. Raids already on the site when the feature first runs are treated as handled, and each raid is recorded once at most.
+**Website raids.** He watches the raid results feed (`RAID_RESULTS_API_URL`, the Fire Nation website's `/api/raids`) and only reads it when the site reports new results — between raids each check is answered "not modified" and nothing is processed. Each new raid Fire fought in becomes an approval card in the owner log channel: every Fire player on Fire's side gets **1 merit for attending, +1 if Fire won** (so 2 for a win, 1 for a loss or tie) once an Advisor or above approves; in an alliance only Fire's own players count. Roblox names are matched to Fire Nation Military members by any word of their nickname, display name or username; players who match nobody (or more than one person) are listed on the card instead. `/robloxlink set roblox_name member` (HR+) links a Roblox name that differs from someone's Discord name — approving re-reads the raid, so linking before approving is enough. Raids already on the site when the feature first runs are treated as handled, and each raid is recorded once at most.
 
 **Leaderboards.** `/resetdata` starts the current leaderboard over; nothing is deleted — the rows are stamped with the reset time and stay on the all-time leaderboard. Once a day at midnight UTC, anyone who is no longer in the home server (`MERIT_HOME_GUILD_ID`, Fire Nation Military by default) is taken off both; their records move to `merit_awards_archive`.
 
@@ -108,7 +108,7 @@ MERIT_CONCLUSION_CHANNEL_IDS=                # channels whose "... Concluded" po
 # Optional
 MERIT_HOME_GUILD_ID=                         # default: Fire Nation Military
 RAID_RESULTS_API_URL=                        # default: the Fire Nation website's /api/raids; set it empty to turn off
-RAID_RESULTS_POLL_SECONDS=120
+RAID_RESULTS_POLL_SECONDS=60                 # how often to ask whether the results changed
 DISCORD_HR_ROLE_IDS=                         # extra role IDs that count as HR
 DISCORD_TEST_GUILD_ID=                       # register slash commands to one server instantly
 GOOGLE_API_KEY=                              # Gemini chat and text-to-speech
