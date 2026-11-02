@@ -22,36 +22,37 @@ MERIT_SCHEMAS: list[dict] = [
             "name": "award_merit",
             "description": (
                 "Awards merits to one or more members. Use type 'bonus' for one or more named members, each "
-                "receiving the same 0.1-50 amount (Advisor+ only); use 'exam'/'event' (HR+) or 'raid' "
-                "(Advisor+ only) with a required host — the person who receives the merit for running it — "
-                "plus any participant usernames. Exams and events (not raids) can also have a cohost, who gets an "
+                "receiving the same 0.1-50 amount (Advisor+ only); use 'exam'/'event' (HR+) with a required "
+                "host — the person who receives the merit for running it — plus any participant usernames. "
+                "Raid merits are not awarded here: they come only from the website's raid results, which the "
+                "officers approve. Exams and events can also have a cohost, who gets an "
                 "extra 0.5 on top of their participant merit — list them in usernames too if they took part. "
                 "For an 'exam', usernames are the guards and co-host only: never include the people who "
-                "passed or took the exam, they earn no merit. Spectators of any exam/event/raid go in spectators, "
+                "passed or took the exam, they earn no merit. Spectators of any exam/event go in spectators, "
                 "not usernames: they get 1 merit each, whatever the activity pays."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "merit_type": {"type": "string", "enum": ["exam", "event", "raid", "bonus"]},
+                    "merit_type": {"type": "string", "enum": ["exam", "event", "bonus"]},
                     "usernames": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
                             "Usernames/display names/IDs of participants to award. For 'bonus', all listed "
-                            "members receive the same amount. For 'exam'/'event'/'raid', these are additional "
+                            "members receive the same amount. For 'exam'/'event', these are additional "
                             "participants beyond the host; can be empty if only the host is being credited."
                         ),
                     },
                     "spectators": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional, 'exam'/'event'/'raid' only: people who spectated. 1 merit each.",
+                        "description": "Optional, 'exam'/'event' only: people who spectated. 1 merit each.",
                     },
                     "host": {
                         "type": "string",
                         "description": (
-                            "Required for 'exam'/'event'/'raid' — the username/display name/ID of whoever "
+                            "Required for 'exam'/'event' — the username/display name/ID of whoever "
                             "hosted it. Never assume it is the person you are talking to."
                         ),
                     },
@@ -369,7 +370,13 @@ async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: st
             f"{_not_found_note(not_found)} — logged for owners."
         )
 
-    # exam / event / raid — host is required and is the one credited
+    if merit_type == "raid":
+        raise merit.MeritError(
+            "Raid merits aren't given by hand any more — they come from the website's raid results, "
+            "as an approval card in the owner log channel."
+        )
+
+    # exam / event — host is required and is the one credited
     host_query = str(args.get("host") or "").strip()
     if not host_query:
         raise merit.MeritError("I need a host for that award — that's who receives the merit.")
@@ -419,8 +426,6 @@ async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: st
             f" Co-host {cohost} received a **+{merit.fmt_amount(merit.COHOST_BONUS_AMOUNT)}** bonus"
             + ("." if listed else " only — they weren't listed as a participant.")
         )
-    elif cohost_query and merit_type not in merit.COHOST_MERIT_TYPES:
-        cohost_note = " Raids have no co-host bonus, so none was given."
     return (
         f"Recorded **+{merit.fmt_amount(amount)}** {merit_type} merit{merit.plural(amount)} for "
         f"**{len(recipients)}** member{'' if len(recipients) == 1 else 's'} (Host: {host})"

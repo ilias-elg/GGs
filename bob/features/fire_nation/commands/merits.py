@@ -195,8 +195,9 @@ class MeritCommands(FireNationCog):
         spectators: str | None = None,
     ) -> None:
         """
-        exam / event / raid — the host plus everyone pinged in the announcement;
-        co-hosts (exam/event) get +0.5. Pings on the announcement's Spectators
+        exam / event — the host plus everyone pinged in the announcement;
+        co-hosts get +0.5. (Raid merits come only from the website's raid
+        results — see website_raids.py.) Pings on the announcement's Spectators
         line, or in `spectators`, get merit.SPECTATOR_AMOUNT instead.
         `activity` names what was actually run when it differs from the merit
         type: a training is recorded with the event rules.
@@ -351,20 +352,6 @@ class MeritCommands(FireNationCog):
         host: discord.Member, cohost: discord.Member | None = None, spectators: str | None = None,
     ) -> None:
         await self._award_activity(interaction, "event", announcement, proof, host, cohost, spectators=spectators)
-
-    @addmerit.command(name="raid", description="Award 3 merits to participants, 1 to spectators. Advisor and above only.")
-    @app_commands.describe(
-        announcement="Paste the full raid conclusion — pings on the Spectators line get 1, everyone else 3.",
-        proof="Discord message link as proof",
-        host="The host who led this raid — receives the merit.",
-        spectators="Optional: @mention spectators not already on the post's Spectators line — 1 merit each.",
-    )
-    @app_commands.rename(host="hosted_by", proof="proof_link", spectators="spectated_by")
-    async def addmerit_raid(
-        self, interaction: discord.Interaction, announcement: str, proof: str, host: discord.Member,
-        spectators: str | None = None,
-    ) -> None:
-        await self._award_activity(interaction, "raid", announcement, proof, host, None, spectators=spectators)
 
     @addmerit.command(
         name="bonus", description="Award 0.1–50 bonus merits to one or more members. Advisor and above only."

@@ -68,7 +68,7 @@ Slash commands:
 | `/merits` | everyone | A member's current and all-time totals, or the leaderboard |
 | `/leaderboard board:` | everyone | The **Current** leaderboard (since the last reset) or the **All Time** one |
 | `/addmerit exam` / `training` / `event` | HR+ | +1 to the host and the counted pings in the pasted conclusion; a co-host gets an extra 0.5; spectators get 1 |
-| `/addmerit raid` / `bonus`, `/removemerit` | Advisor+ | +3 per raid participant (spectators 1); 0.1–50 bonus with a reason, or removal |
+| `/addmerit bonus`, `/removemerit` | Advisor+ | 0.1–50 bonus with a reason, or removal |
 | `/merithistory`, `/addknowledge`, `/reloadknowledge` | HR+ | Ledger history; knowledge base entries |
 | `/robloxlink set` / `remove` / `list` | HR+ | Match Roblox names on the raid results site to members |
 | `/createhr`, `/createadvisor` | Royalty+ | Create the rank roles (no Discord permissions) |
@@ -79,13 +79,13 @@ Slash commands:
 
 Ranks: Owner and Fire Lord come from the user IDs below; Royalty, Advisor and HR are Discord roles with exactly those names. Merits live in Postgres (`DATABASE_URL`, table `merit_awards`). Every award, removal and reset is posted to the owner log channel.
 
-**Conclusion posts.** Posts titled "... Exam/Training/Event/Raid Concluded" in the channels listed in `MERIT_CONCLUSION_CHANNEL_IDS` are counted automatically: he posts an Approve / Reject card in the owner log channel and records it once someone with the rank approves. The author is the host. What counts:
+**Conclusion posts.** Posts titled "... Exam/Training/Event Concluded" in the channels listed in `MERIT_CONCLUSION_CHANNEL_IDS` are counted automatically: he posts an Approve / Reject card in the owner log channel and records it once someone with the rank approves. The author is the host. What counts:
 
 | Post | Earns the merit | Gets nothing |
 | --- | --- | --- |
 | Exam / induction (1) | `Co-host:`, `Guards:` | `Passed:` |
 | Training (1) | `Co-host:`, `Attendees:` | winners, teams |
-| Event (1), Raid (3) | every ping | — |
+| Event (1) | every ping | — |
 
 Any post can also have a `Spectators:` line (or "thanks @a @b for spectating"): those people get **1 merit** whatever the activity pays. The person pinged after "Co-host" gets +0.5 on top. Anyone who is not a member of the home server is left out. `/addmerit` reads the pasted conclusion the same way, and its `spectated_by` option adds spectators that are not on the post.
 

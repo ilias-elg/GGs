@@ -48,13 +48,12 @@ _SENTENCE_ROLES = {
 }
 _SPECTATING_SENTENCE = re.compile(r"[^.!?\n]*\bfor\s+spectating\b", re.IGNORECASE)
 # For /addmerit, which reads the same lines: activity → (labels, how to name them in a reply).
-# Raids and events count every ping, so they have no entry.
+# Events count every ping, so they have no entry.
 COUNTED_LINES = {
     "exam": (_EXAM_LABELS, "**Co-host**, **Guards** and **Spectators**"),
     "training": (_TRAINING_LABELS, "**Co-host**, **Attendees** and **Spectators**"),
 }
 _TYPE_KEYWORDS = (
-    ("raid", "raid", "Raid", None),
     # Merits are for running or watching an exam, not for passing it: the
     # people on the "Passed:" line get nothing.
     ("exam", "exam", "Exam", _EXAM_LABELS),
@@ -152,7 +151,7 @@ def split_counted(content: str, labels: str | None) -> tuple[str, list[int], lis
     """
     (participant text, participant IDs, spectator IDs) for a conclusion.
     `labels` are the lines whose pings take part (exams, trainings); None
-    means every ping outside the Spectators line (raids, events). Someone on
+    means every ping outside the Spectators line (events). Someone on
     both lists counts as a participant.
     """
     if labels:

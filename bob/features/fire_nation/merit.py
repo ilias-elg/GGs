@@ -36,14 +36,18 @@ def plural(amount: float) -> str:
 
 
 def fixed_merit_amount(merit_type: str) -> float:
-    """exam/event = 1, raid = 3. Bonus has no fixed amount — it's user-supplied."""
-    return 3 if merit_type == "raid" else 1
+    """
+    exam/event = 1. Bonus has no fixed amount — it's user-supplied — and raid
+    merits come only from the website's raid results, which set their own
+    (website_raids.raid_amount).
+    """
+    return 1
 
 
 # Exams and events only: a co-host earns this on top of the participant merit
 # they get for being pinged in the announcement.
 COHOST_BONUS_AMOUNT = 0.5
-# Watching an exam, training, event or raid is worth this, whatever the
+# Watching an exam, training or event is worth this, whatever the
 # activity itself pays. Someone listed as both a participant and a
 # spectator gets the participant amount.
 SPECTATOR_AMOUNT = 1
