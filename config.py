@@ -126,6 +126,14 @@ MERIT_HOME_GUILD_ID: int = int(_first_env("MERIT_HOME_GUILD_ID") or 152855112324
 # Channels where "... Concluded" posts are read and turned into an approval
 # card in the owner log channel. Empty = automatic counting is off.
 MERIT_CONCLUSION_CHANNEL_IDS: frozenset[int] = _id_set("MERIT_CONCLUSION_CHANNEL_IDS")
+# The Fire Nation website's raid results feed. Each new raid Fire fought in
+# becomes an approval card for raid merits. Empty = turned off.
+RAID_RESULTS_API_URL: str = _first_env("RAID_RESULTS_API_URL") if "RAID_RESULTS_API_URL" in os.environ else (
+    "https://fire-nation-website.vercel.app/api/raids"
+)
+# The page people open to check a raid; used as the proof link.
+RAID_RESULTS_PAGE_URL: str = _first_env("RAID_RESULTS_PAGE_URL") or "https://fire-nation-website.vercel.app/src/pages/raids"
+RAID_RESULTS_POLL_SECONDS: int = int(_first_env("RAID_RESULTS_POLL_SECONDS") or 120)
 # Slash commands registered to one guild appear instantly; global ones can
 # take up to an hour.
 TEST_GUILD_ID: int = int(_first_env("DISCORD_TEST_GUILD_ID") or 0)

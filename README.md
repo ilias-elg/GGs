@@ -70,6 +70,7 @@ Slash commands:
 | `/addmerit exam` / `training` / `event` | HR+ | +1 to the host and the counted pings in the pasted conclusion; a co-host gets an extra 0.5; spectators get 1 |
 | `/addmerit raid` / `bonus`, `/removemerit` | Advisor+ | +3 per raid participant (spectators 1); 0.1–50 bonus with a reason, or removal |
 | `/merithistory`, `/addknowledge`, `/reloadknowledge` | HR+ | Ledger history; knowledge base entries |
+| `/robloxlink set` / `remove` / `list` | HR+ | Match Roblox names on the raid results site to members |
 | `/createhr`, `/createadvisor` | Royalty+ | Create the rank roles (no Discord permissions) |
 | `/createroyalty`, `/resetdata`, `/diagnostics` | Owner / Fire Lord | Role, reset the current leaderboard (backup posted first), system check |
 | `/access add` / `remove` / `list` | Owner / Fire Lord | Who he holds conversations with (also: "archivist, talk to @user") |
@@ -88,6 +89,8 @@ Ranks: Owner and Fire Lord come from the user IDs below; Royalty, Advisor and HR
 
 Any post can also have a `Spectators:` line (or "thanks @a @b for spectating"): those people get **1 merit** whatever the activity pays. The person pinged after "Co-host" gets +0.5 on top. Anyone who is not a member of the home server is left out. `/addmerit` reads the pasted conclusion the same way, and its `spectated_by` option adds spectators that are not on the post.
 
+**Website raids.** Every 2 minutes he reads the raid results feed (`RAID_RESULTS_API_URL`, the Fire Nation website's `/api/raids`). Each new raid Fire fought in becomes an approval card in the owner log channel: every Fire player on Fire's side gets the raid merit (3) once an Advisor or above approves; in an alliance only Fire's own players count. Roblox names are matched to Fire Nation Military members by any word of their nickname, display name or username; players who match nobody (or more than one person) are listed on the card instead. `/robloxlink set roblox_name member` (HR+) links a Roblox name that differs from someone's Discord name — approving re-reads the raid, so linking before approving is enough. Raids already on the site when the feature first runs are treated as handled, and each raid is recorded once at most.
+
 **Leaderboards.** `/resetdata` starts the current leaderboard over; nothing is deleted — the rows are stamped with the reset time and stay on the all-time leaderboard. Once a day at midnight UTC, anyone who is no longer in the home server (`MERIT_HOME_GUILD_ID`, Fire Nation Military by default) is taken off both; their records move to `merit_awards_archive`.
 
 The same merit actions work in conversation ("archivist, give narek 2 bonus merits for carrying the raid"), with the same rank checks. The Owner and Fire Lord can also give him standing orders ("from now on keep replies short"), which are saved and applied to every later conversation.
@@ -104,6 +107,8 @@ DATABASE_URL=postgresql://user:password@host/dbname   # Neon, Supabase, Railway�
 MERIT_CONCLUSION_CHANNEL_IDS=                # channels whose "... Concluded" posts are counted
 # Optional
 MERIT_HOME_GUILD_ID=                         # default: Fire Nation Military
+RAID_RESULTS_API_URL=                        # default: the Fire Nation website's /api/raids; set it empty to turn off
+RAID_RESULTS_POLL_SECONDS=120
 DISCORD_HR_ROLE_IDS=                         # extra role IDs that count as HR
 DISCORD_TEST_GUILD_ID=                       # register slash commands to one server instantly
 GOOGLE_API_KEY=                              # Gemini chat and text-to-speech

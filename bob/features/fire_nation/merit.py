@@ -168,6 +168,24 @@ async def ensure_merit_tables() -> None:
         # leaderboard; every row, stamped or not, makes up the all-time one.
         for table in ("merit_awards", "merit_awards_archive"):
             await db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS reset_at timestamp with time zone")
+        # Roblox username → Discord member, for raids read from the website
+        # when someone's Discord name isn't their Roblox name.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS roblox_links (
+                roblox_name text PRIMARY KEY NOT NULL,
+                member_id text NOT NULL,
+                linked_by_id text NOT NULL,
+                linked_at timestamp with time zone DEFAULT now() NOT NULL
+            )
+        """)
+        # Website raids already turned into an approval card (or skipped), so
+        # each one is only ever offered once.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS website_raids_seen (
+                raid_id text PRIMARY KEY NOT NULL,
+                seen_at timestamp with time zone DEFAULT now() NOT NULL
+            )
+        """)
 
 
 _INSERT = (

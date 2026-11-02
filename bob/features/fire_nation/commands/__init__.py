@@ -6,6 +6,7 @@ the handlers here only parse options, call those, and format the reply.
 
 from .admin import AdminCommands
 from .merits import MeritCommands
+from .raids import RaidResultsCommands
 from .voice import VoiceCommands
 
-COGS = (MeritCommands, AdminCommands, VoiceCommands)
+COGS = (MeritCommands, RaidResultsCommands, AdminCommands, VoiceCommands)
