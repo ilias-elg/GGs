@@ -1,44 +1,101 @@
 """Raid merits from the Fire Nation website, and /robloxlink for names that don't match."""
 
+import asyncio
 import logging
 
 import discord
 from discord import app_commands
-from discord.ext import tasks
+from discord.ext import commands, tasks
 
 import config
 
 from .. import merit, website_raids
-from ..ranks import rank_at_least
+from ..ranks import get_rank, rank_at_least
 from .base import FireNationCog
 
 logger = logging.getLogger("discord")
 
+# After a "Raid Concluded" post the website usually has the results within a
+# few minutes; it is asked at these delays (minutes) until the raid shows up.
+AFTER_CONCLUSION_MINUTES = (2, 5, 10, 20, 40)
+
 
 class RaidResultsCommands(FireNationCog):
-    """Polls the website's raid results and manages Roblox ↔ Discord links."""
+    """Checks the website's raid results when a raid has happened, and manages Roblox ↔ Discord links."""
+
+    def __init__(self, bot) -> None:
+        super().__init__(bot)
+        self._after_conclusion: asyncio.Task | None = None
 
     async def cog_load(self) -> None:
         self.bot.add_dynamic_items(website_raids.WebsiteRaidButton)
-        if config.RAID_RESULTS_API_URL:
-            self.poll_raids.change_interval(seconds=max(30, config.RAID_RESULTS_POLL_SECONDS))
-            self.poll_raids.start()
+        if config.RAID_RESULTS_API_URL and config.RAID_RESULTS_POLL_SECONDS > 0:
+            self.fallback_check.change_interval(seconds=max(600, config.RAID_RESULTS_POLL_SECONDS))
+            self.fallback_check.start()
 
     async def cog_unload(self) -> None:
-        self.poll_raids.cancel()
+        self.fallback_check.cancel()
+        if self._after_conclusion:
+            self._after_conclusion.cancel()
 
-    @tasks.loop(seconds=60)
-    async def poll_raids(self) -> None:
+    async def _check(self, why: str) -> int:
         try:
             posted = await website_raids.check_for_new_raids(self.bot)
             if posted:
-                logger.info(f"Posted {posted} website raid card(s) for approval")
+                logger.info(f"Posted {posted} website raid card(s) for approval ({why})")
+            return posted
         except Exception as e:
-            logger.error(f"Website raid check failed: {e}", exc_info=True)
+            logger.error(f"Website raid check failed ({why}): {e}", exc_info=True)
+            return 0
 
-    @poll_raids.before_loop
-    async def _before_poll(self) -> None:
+    # A slow safety net for raids nobody concluded in Discord. Its first run
+    # is at startup, which also picks up anything missed while offline.
+    @tasks.loop(hours=6)
+    async def fallback_check(self) -> None:
+        await self._check("scheduled check")
+
+    @fallback_check.before_loop
+    async def _before_fallback(self) -> None:
         await self.bot.wait_until_ready()
+
+    async def _watch_after_conclusion(self) -> None:
+        waited = 0
+        for minutes in AFTER_CONCLUSION_MINUTES:
+            await asyncio.sleep((minutes - waited) * 60)
+            waited = minutes
+            if await self._check(f"{minutes} min after a raid conclusion"):
+                return
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if not config.RAID_RESULTS_API_URL or message.channel.id not in config.MERIT_CONCLUSION_CHANNEL_IDS:
+            return
+        if not website_raids.is_raid_conclusion(message.content):
+            return
+        # One watch at a time: a second post while one runs changes nothing.
+        if self._after_conclusion is None or self._after_conclusion.done():
+            self._after_conclusion = asyncio.create_task(self._watch_after_conclusion())
+            logger.info("Raid concluded — checking the website for its results over the next 40 minutes")
+
+    # ── /raidcheck ───────────────────────────────────────────────────────────
+
+    @app_commands.command(name="raidcheck", description="Check the website for new raid results now. Advisor and above.")
+    @app_commands.guild_only()
+    async def raidcheck(self, interaction: discord.Interaction) -> None:
+        try:
+            merit.assert_can_award(get_rank(interaction.user), "raid")
+        except merit.MeritError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+        if not config.RAID_RESULTS_API_URL:
+            await interaction.response.send_message("Reading raid results from the website is turned off.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        posted = await self._check(f"/raidcheck by {interaction.user}")
+        await interaction.edit_original_response(
+            content=f"Posted **{posted}** new raid card{'' if posted == 1 else 's'} in the owner log channel."
+            if posted else "No new raids on the website."
+        )
 
     # ── /robloxlink ──────────────────────────────────────────────────────────
 

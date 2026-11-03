@@ -5,8 +5,12 @@ The website's feed (config.RAID_RESULTS_API_URL) lists every raid with each
 player's Roblox username and side. For each new raid Fire fought in, the
 Archivist posts a card in the owner log channel: every Fire player on Fire's
 side who can be matched to a member of the home server gets 1 merit for
-attending, +1 if Fire won, once someone with the rank approves. The feed is
-only read when the site reports it changed (ETag / 304 Not Modified).
+attending, +1 if Fire won, once someone with the rank approves.
+
+Every request to the feed makes the website fetch from its own data source,
+so it is asked as rarely as possible: when a raid has just been concluded in
+Discord, when an officer runs /raidcheck, once at startup and on a slow
+fallback timer — and never more than once a minute, whatever asks.
 
 Roblox names are matched to Discord members by their nickname, display name
 or username (any word in it, so "vShadeXII | BST" matches vShadeXII), or by a
@@ -17,6 +21,7 @@ be matched are listed on the card instead of being guessed.
 import asyncio
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -40,48 +45,53 @@ _approval_lock = asyncio.Lock()
 ATTENDANCE_AMOUNT = 1
 WIN_AMOUNT = 1
 
-# The feed's ETag from the last check. The site answers "304 Not Modified"
-# with no body while nothing has changed, so between raids a check costs
-# next to nothing and nothing is processed.
-_etag: str | None = None
+# Hard floor between two requests to the website, whatever triggers them:
+# anything asking sooner gets the last results instead.
+MIN_FETCH_INTERVAL_SECONDS = 60
+_last_fetch_at = 0.0
+_last_feed: dict | None = None
+_fetch_lock = asyncio.Lock()
 
 
 # ─── The feed ─────────────────────────────────────────────────────────────────
 
 
-async def fetch_feed(only_if_changed: bool = False) -> dict | None:
+async def fetch_feed() -> dict | None:
     """
     The website's raid feed, or None when it can't be read or is serving
-    stale data. With `only_if_changed`, also None when nothing has changed
-    since the last check.
+    stale data. Within MIN_FETCH_INTERVAL_SECONDS of the last request the
+    previous results are returned without asking the website again.
     """
-    global _etag
+    global _last_fetch_at, _last_feed
     if not config.RAID_RESULTS_API_URL:
         return None
-    headers = {"User-Agent": "FireNationArchivist/1.0"}
-    if only_if_changed and _etag:
-        headers["If-None-Match"] = _etag
-    try:
-        async with httpx.AsyncClient(timeout=15, headers=headers) as client:
-            res = await client.get(config.RAID_RESULTS_API_URL)
-        if res.status_code == 304:
+    async with _fetch_lock:
+        if time.monotonic() - _last_fetch_at < MIN_FETCH_INTERVAL_SECONDS:
+            return _last_feed
+        # Counted before the request, so a failing site isn't retried any faster.
+        _last_fetch_at = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "FireNationArchivist/1.0"}) as client:
+                res = await client.get(config.RAID_RESULTS_API_URL)
+            res.raise_for_status()
+            data = res.json()
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning(f"Raid results feed unavailable: {e}")
             return None
-        res.raise_for_status()
-        data = res.json()
-    except (httpx.HTTPError, ValueError) as e:
-        logger.warning(f"Raid results feed unavailable: {e}")
-        return None
-    if not isinstance(data, dict) or not isinstance(data.get("raids"), list):
-        logger.warning("Raid results feed returned something unexpected — skipped.")
-        return None
-    if data.get("stale"):
-        # The site couldn't reach its own source and is showing old results.
-        return None
-    if only_if_changed:
-        # Remembered only once the new results were read successfully, so a
-        # failed check is simply repeated next time.
-        _etag = res.headers.get("ETag")
-    return data
+        if not isinstance(data, dict) or not isinstance(data.get("raids"), list):
+            logger.warning("Raid results feed returned something unexpected — skipped.")
+            return None
+        if data.get("stale"):
+            # The site couldn't reach its own source and is showing old results.
+            return None
+        _last_feed = data
+        return data
+
+
+def is_raid_conclusion(content: str) -> bool:
+    """A "... Raid Concluded" post: the sign a new raid is about to appear on the website."""
+    head = " ".join(line for line in content.lower().splitlines()[:3])
+    return "concluded" in head and "raid" in head
 
 
 def fire_won(raid: dict) -> bool:
@@ -365,21 +375,11 @@ async def _mark_seen(raid_ids: list[str]) -> None:
 
 
 async def check_for_new_raids(bot: discord.Client) -> int:
-    """
-    Posts a card for each raid not seen before. Returns how many cards were
-    posted. Does nothing at all while the website's results are unchanged.
-    """
-    global _etag
-    feed = await fetch_feed(only_if_changed=True)
+    """Posts a card for each raid not seen before. Returns how many cards were posted."""
+    feed = await fetch_feed()
     if feed is None:
         return 0
-    try:
-        posted, complete = await _offer_new_raids(bot, feed)
-    except Exception:
-        _etag = None  # read these results again next time
-        raise
-    if not complete:
-        _etag = None  # something couldn't be posted yet; look again next time
+    posted, _ = await _offer_new_raids(bot, feed)
     return posted
 
 

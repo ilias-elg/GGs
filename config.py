@@ -133,9 +133,10 @@ RAID_RESULTS_API_URL: str = _first_env("RAID_RESULTS_API_URL") if "RAID_RESULTS_
 )
 # The page people open to check a raid; used as the proof link.
 RAID_RESULTS_PAGE_URL: str = _first_env("RAID_RESULTS_PAGE_URL") or "https://fire-nation-website.vercel.app/src/pages/raids"
-# How often to ask the site whether anything changed. While nothing has, it
-# answers "not modified" with no data and nothing is processed.
-RAID_RESULTS_POLL_SECONDS: int = int(_first_env("RAID_RESULTS_POLL_SECONDS") or 60)
+# Every request makes the website fetch from its own data source, so the feed
+# is mainly checked after a "Raid Concluded" post or /raidcheck. This is only
+# the safety-net interval (0 = no timer at all; never below 10 minutes).
+RAID_RESULTS_POLL_SECONDS: int = int(_first_env("RAID_RESULTS_POLL_SECONDS") or 6 * 3600)
 # Slash commands registered to one guild appear instantly; global ones can
 # take up to an hour.
 TEST_GUILD_ID: int = int(_first_env("DISCORD_TEST_GUILD_ID") or 0)
