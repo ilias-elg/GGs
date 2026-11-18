@@ -250,14 +250,21 @@ INACTIVITY_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "inactivity_exempt",
-            "description": "Protects a member from inactivity cleanups (e.g. on a break), or removes that protection. Owner/Fire Lord only.",
+            "description": (
+                "Protects one or more members from inactivity cleanups (e.g. on a break), or removes that "
+                "protection. Put everyone the user names in ONE call. Owner/Fire Lord only."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "username": {"type": "string"},
+                    "usernames": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Usernames, display names or IDs of every member to change.",
+                    },
                     "exempt": {"type": "boolean", "description": "true = protect (default), false = remove protection"},
                 },
-                "required": ["username"],
+                "required": ["usernames"],
             },
         },
     },
@@ -757,16 +764,26 @@ async def _inactivity(name: str, args: dict, message: discord.Message, bot) -> s
         count = await inactivity.clear_warnings(guild.id, target.id if target else None)
         return f"Cancelled {count} pending warning(s)."
     if name == "inactivity_exempt":
-        target = find_member(guild, str(args.get("username", "")))
-        if isinstance(target, str):
-            raise merit.MeritError(target)
+        names = args.get("usernames")
+        if not isinstance(names, list):
+            names = [args.get("usernames") or args.get("username") or ""]
+        targets, not_found, ambiguous = _resolve_all(guild, [str(n) for n in names if str(n).strip()])
+        if ambiguous:
+            raise merit.MeritError(ambiguous)
+        if not targets:
+            raise merit.MeritError("I could not locate any of the members named. Nothing was changed.")
         exempt = args.get("exempt") is not False
-        changed = await inactivity.set_exempt(guild.id, target.id, exempt, actor.id)
-        if exempt:
-            await inactivity.clear_warnings(guild.id, target.id)
-        if not changed:
-            return f"No change — {target} was already that way."
-        return f"{target} is {'now exempt from' if exempt else 'no longer exempt from'} inactivity cleanups."
+        changed = []
+        for target in targets:
+            if await inactivity.set_exempt(guild.id, target.id, exempt, actor.id):
+                changed.append(target)
+            if exempt:
+                await inactivity.clear_warnings(guild.id, target.id)
+        verb = "now exempt from" if exempt else "no longer exempt from"
+        text = f"{_names(targets)} {'is' if len(targets) == 1 else 'are'} {verb} inactivity cleanups."
+        if len(changed) < len(targets):
+            text += f" ({len(targets) - len(changed)} already were.)"
+        return text + _not_found_note(not_found)
     raise merit.MeritError(f"Unknown tool {name}")
 
 
@@ -871,6 +888,8 @@ async def execute_fire_nation_tool(name: str, args: dict, ctx: dict) -> dict:
         return {"error": f"Nothing was done. {e}"}
     except (TypeError, ValueError) as e:
         return {"error": f"Nothing was done — bad arguments: {e}"}
+    except discord.DiscordException as e:
+        return {"error": f"Discord refused that ({str(e)[:150]}). I can't confirm it went through."}
     except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError) as e:
         return {"error": (
             f"The merit database failed ({str(e)[:150]}). I can't confirm whether it went through — "
