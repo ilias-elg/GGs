@@ -212,5 +212,4 @@ class InactivityCommands(FireNationCog):
         verb = "is now exempt from" if exempt else "is no longer exempt from"
         await interaction.response.send_message(
             f"{member.mention} {verb} inactivity cleanups." if changed else "No change — they were already that way.",
-            ephemeral=True,
         )
