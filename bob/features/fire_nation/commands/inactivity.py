@@ -71,7 +71,7 @@ class InactivityCommands(FireNationCog):
     async def _guard(self, interaction: discord.Interaction) -> bool:
         if can_manage(interaction.user):
             return True
-        await interaction.response.send_message(DENIED, ephemeral=True)
+        await interaction.response.send_message(DENIED)
         return False
 
     @inactivity.command(name="preview", description="List who has gained no merits in the last N days. Changes nothing.")
@@ -79,7 +79,7 @@ class InactivityCommands(FireNationCog):
     async def preview(self, interaction: discord.Interaction, days: app_commands.Range[int, 1, 365] = inact.DEFAULT_DAYS) -> None:
         if not await self._guard(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         members = await inact.find_inactive(interaction.guild, days)
         await interaction.edit_original_response(
             content=(
@@ -101,7 +101,7 @@ class InactivityCommands(FireNationCog):
     ) -> None:
         if not await self._guard(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         guild = interaction.guild
         members = await inact.find_inactive(guild, days)
         if not members:
@@ -132,7 +132,7 @@ class InactivityCommands(FireNationCog):
     async def status(self, interaction: discord.Interaction) -> None:
         if not await self._guard(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         rows = await inact.pending_warnings(interaction.guild.id)
         lines = [
             f"• <@{r['member_id']}> — ends <t:{int(r['deadline'].timestamp())}:R>"
@@ -162,7 +162,7 @@ class InactivityCommands(FireNationCog):
     ) -> None:
         if not await self._guard(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         guild = interaction.guild
         due, skipped = await inact.due_for_removal(guild, include_undelivered=include_no_dm)
         notes = []
@@ -199,7 +199,7 @@ class InactivityCommands(FireNationCog):
         if not await self._guard(interaction):
             return
         count = await inact.clear_warnings(interaction.guild.id, member.id if member else None)
-        await interaction.response.send_message(f"Cancelled {count} pending warning(s).", ephemeral=True)
+        await interaction.response.send_message(f"Cancelled {count} pending warning(s).")
 
     @inactivity.command(name="exempt", description="Never include a member in inactivity cleanups (e.g. on a break).")
     @app_commands.describe(member="The member", exempt="True to protect them, False to remove the protection")
