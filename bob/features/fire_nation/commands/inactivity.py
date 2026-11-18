@@ -199,8 +199,9 @@ class InactivityCommands(FireNationCog):
     async def cancel(self, interaction: discord.Interaction, member: discord.Member | None = None) -> None:
         if not await self._guard(interaction):
             return
+        await interaction.response.defer()
         count = await inact.clear_warnings(interaction.guild.id, member.id if member else None)
-        await interaction.response.send_message(f"Cancelled {count} pending warning(s).")
+        await interaction.edit_original_response(content=f"Cancelled {count} pending warning(s).")
 
     @inactivity.command(name="exempt", description="Never include members in inactivity cleanups (e.g. on a break).")
     @app_commands.describe(
@@ -210,11 +211,13 @@ class InactivityCommands(FireNationCog):
     async def exempt(self, interaction: discord.Interaction, members: str, exempt: bool = True) -> None:
         if not await self._guard(interaction):
             return
+        # The database can be slow to wake; Discord drops the command if it isn't answered within 3 seconds.
+        await interaction.response.defer()
         ids = list(dict.fromkeys(int(i) for i in re.findall(r"\d{15,20}", members)))
         found = [m for m in (interaction.guild.get_member(i) for i in ids) if m]
         if not found:
-            await interaction.response.send_message(
-                "I couldn't find anyone in that. @mention the members (or paste their IDs).", ephemeral=True
+            await interaction.edit_original_response(
+                content="I couldn't find anyone in that. @mention the members (or paste their IDs)."
             )
             return
         for member in found:
@@ -223,6 +226,6 @@ class InactivityCommands(FireNationCog):
                 await inact.clear_warnings(interaction.guild.id, member.id)
         verb = "now exempt from" if exempt else "no longer exempt from"
         missing = f" Couldn't find {len(ids) - len(found)} of the IDs." if len(found) < len(ids) else ""
-        await interaction.response.send_message(
+        await interaction.edit_original_response(content=
             f"{' '.join(m.mention for m in found)} {'is' if len(found) == 1 else 'are'} {verb} inactivity cleanups.{missing}"
         )
