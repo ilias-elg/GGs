@@ -512,7 +512,8 @@ class ConversationManager:
                 if not stood_down():
                     try:
                         await message.reply(
-                            _OUT_OF_QUOTA_REPLY if isinstance(e, AIQuotaExhausted) else _FAILED_REPLY
+                            _OUT_OF_QUOTA_REPLY if isinstance(e, AIQuotaExhausted)
+                            else getattr(e, "user_message", None) or _FAILED_REPLY
                         )
                     except discord.HTTPException as send_error:
                         logger.warning(f"Could not send the fallback reply: {send_error}")
