@@ -16,12 +16,13 @@ logger = logging.getLogger("discord")
 async def setup(bot):
     os.makedirs(config.DATA_DIR, exist_ok=True)
 
-    from . import greetings, knowledge, merit, orders, presence, ranks
+    from . import greetings, inactivity, knowledge, merit, orders, presence, ranks
     from bob.voice.manager import get_voice_manager
 
     # A database problem must not take the other features down with it.
     try:
         await merit.ensure_merit_tables()
+        await inactivity.ensure_tables()
     except Exception as e:
         logger.error(f"Merit database unavailable — merit commands will fail until it is fixed: {e}")
     knowledge.load_knowledge()
