@@ -76,6 +76,7 @@ Slash commands:
 | `/createroyalty`, `/resetdata`, `/diagnostics` | Owner / Fire Lord | Role, reset the current leaderboard (backup posted first), system check |
 | `/access add` / `remove` / `list` | Owner / Fire Lord | Who he holds conversations with (also: "archivist, talk to @user") |
 | `/cleanup` | Owner / Fire Lord | Delete his own messages from the last 10 minutes (or `minutes:`) in a channel, or with `server:` in every channel of any server he is in |
+| `/inactivity preview` / `warn` / `status` / `kick` / `cancel` / `exempt` | Owner / Fire Lord | Find members with no merits gained in `days:` (default 30), DM them a warning with a `grace_days:` countdown (default 7), then remove those who still earned nothing. Warn and kick each need a button confirmation; bots, HR+ ranks, the exempt list and recent joiners are never touched; people whose DMs are closed are skipped unless `include_no_dm` |
 | `/voice join` / `leave` / `say` / `status` / `greeting …` | Owner, Fire Lord, access list | Voice — works from any server he shares with you |
 
 Ranks: Owner and Fire Lord come from the user IDs below; Royalty, Advisor and HR are Discord roles with exactly those names. Merits live in Postgres (`DATABASE_URL`, table `merit_awards`). Every award, removal and reset is posted to the owner log channel.
