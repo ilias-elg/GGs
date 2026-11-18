@@ -1,6 +1,7 @@
 """/inactivity — warn members who have gained no merits lately, then remove those who stay inactive."""
 
 import logging
+import re
 
 import discord
 from discord import app_commands
@@ -201,15 +202,27 @@ class InactivityCommands(FireNationCog):
         count = await inact.clear_warnings(interaction.guild.id, member.id if member else None)
         await interaction.response.send_message(f"Cancelled {count} pending warning(s).")
 
-    @inactivity.command(name="exempt", description="Never include a member in inactivity cleanups (e.g. on a break).")
-    @app_commands.describe(member="The member", exempt="True to protect them, False to remove the protection")
-    async def exempt(self, interaction: discord.Interaction, member: discord.Member, exempt: bool = True) -> None:
+    @inactivity.command(name="exempt", description="Never include members in inactivity cleanups (e.g. on a break).")
+    @app_commands.describe(
+        members="@mention one or more members (or paste their IDs)",
+        exempt="True to protect them, False to remove the protection",
+    )
+    async def exempt(self, interaction: discord.Interaction, members: str, exempt: bool = True) -> None:
         if not await self._guard(interaction):
             return
-        changed = await inact.set_exempt(interaction.guild.id, member.id, exempt, interaction.user.id)
-        if exempt:
-            await inact.clear_warnings(interaction.guild.id, member.id)
-        verb = "is now exempt from" if exempt else "is no longer exempt from"
+        ids = list(dict.fromkeys(int(i) for i in re.findall(r"\d{15,20}", members)))
+        found = [m for m in (interaction.guild.get_member(i) for i in ids) if m]
+        if not found:
+            await interaction.response.send_message(
+                "I couldn't find anyone in that. @mention the members (or paste their IDs).", ephemeral=True
+            )
+            return
+        for member in found:
+            await inact.set_exempt(interaction.guild.id, member.id, exempt, interaction.user.id)
+            if exempt:
+                await inact.clear_warnings(interaction.guild.id, member.id)
+        verb = "now exempt from" if exempt else "no longer exempt from"
+        missing = f" Couldn't find {len(ids) - len(found)} of the IDs." if len(found) < len(ids) else ""
         await interaction.response.send_message(
-            f"{member.mention} {verb} inactivity cleanups." if changed else "No change — they were already that way.",
+            f"{' '.join(m.mention for m in found)} {'is' if len(found) == 1 else 'are'} {verb} inactivity cleanups.{missing}"
         )
