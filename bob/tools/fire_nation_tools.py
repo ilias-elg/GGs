@@ -11,9 +11,10 @@ import re
 import asyncpg
 import discord
 
-from bob.features.fire_nation import merit, orders
+import config
+from bob.features.fire_nation import inactivity, merit, orders, website_raids
 from bob.features.fire_nation import ranks
-from bob.features.fire_nation.ranks import RANK_ORDER, get_rank
+from bob.features.fire_nation.ranks import RANK_ORDER, get_rank, rank_at_least
 
 MERIT_SCHEMAS: list[dict] = [
     {
@@ -24,7 +25,7 @@ MERIT_SCHEMAS: list[dict] = [
                 "Awards merits to one or more members. Use type 'bonus' for one or more named members, each "
                 "receiving the same 0.1-50 amount (Advisor+ only); use 'exam'/'event' (HR+) with a required "
                 "host — the person who receives the merit for running it — plus any participant usernames. "
-                "Raid merits are not awarded here: they come only from the website's raid results, which the "
+                "A 'training' is recorded exactly like an 'event'. Raid merits are not awarded here: they come only from the website's raid results, which the "
                 "officers approve. Exams and events can also have a cohost, who gets an "
                 "extra 0.5 on top of their participant merit — list them in usernames too if they took part. "
                 "For an 'exam', usernames are the guards and co-host only: never include the people who "
@@ -34,7 +35,7 @@ MERIT_SCHEMAS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "merit_type": {"type": "string", "enum": ["exam", "event", "bonus"]},
+                    "merit_type": {"type": "string", "enum": ["exam", "event", "training", "bonus"]},
                     "usernames": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -138,12 +139,126 @@ MERIT_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "check_raid_results",
+            "description": (
+                "Checks the Fire Nation website for new raid results now and posts approval cards for them in "
+                "the owner log channel. Same as /raidcheck. Advisor and above only."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "link_roblox_name",
+            "description": (
+                "Manages which member a Roblox username on the raid results site belongs to (same as /robloxlink). "
+                "action 'set' needs roblox_name and username; 'remove' needs roblox_name; 'list' needs nothing. "
+                "HR and above only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["set", "remove", "list"]},
+                    "roblox_name": {"type": "string", "description": "The Roblox username exactly as the raid site shows it."},
+                    "username": {"type": "string", "description": "The Discord member it belongs to ('set' only)."},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "reset_merit_data",
             "description": (
                 "Resets everyone's current merits to 0 after exporting a backup to the owner log channel. The "
                 "all-time leaderboard keeps everything. Owner/Fire Lord only. The user is asked to confirm before it runs."
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
+INACTIVITY_SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "inactivity_preview",
+            "description": (
+                "Lists members who have gained no merits in the last N days (default 30). Read-only. Always run "
+                "this first and show the user who it found before warning or removing anyone. Owner/Fire Lord only."
+            ),
+            "parameters": {"type": "object", "properties": {"days": {"type": "integer", "description": "1-365, default 30"}}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inactivity_warn",
+            "description": (
+                "DMs every member who has gained no merits in the last N days a warning and starts a grace period "
+                "(default 7 days). Nobody is removed by this. The user is asked to confirm first. Owner/Fire Lord only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "1-365, default 30"},
+                    "grace_days": {"type": "integer", "description": "1-60, default 7"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inactivity_status",
+            "description": "Shows who has been warned, when each grace period ends, and who is exempt. Owner/Fire Lord only.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inactivity_kick",
+            "description": (
+                "Removes warned members whose grace period is over and who still earned no merit. Run "
+                "inactivity_status first so the user knows who is affected. The user is asked to confirm first. "
+                "Owner/Fire Lord only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "The window they were warned with, default 30"},
+                    "include_no_dm": {
+                        "type": "boolean",
+                        "description": "Also remove people whose DMs were closed. Only when the user explicitly says so.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inactivity_cancel",
+            "description": "Cancels pending inactivity warnings — one member's if username is given, otherwise everyone's. Owner/Fire Lord only.",
+            "parameters": {"type": "object", "properties": {"username": {"type": "string"}}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inactivity_exempt",
+            "description": "Protects a member from inactivity cleanups (e.g. on a break), or removes that protection. Owner/Fire Lord only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "username": {"type": "string"},
+                    "exempt": {"type": "boolean", "description": "true = protect (default), false = remove protection"},
+                },
+                "required": ["username"],
+            },
         },
     },
 ]
@@ -247,7 +362,7 @@ ACCESS_SCHEMAS: list[dict] = [
 ]
 
 FIRE_NATION_TOOL_NAMES = frozenset(
-    s["function"]["name"] for s in MERIT_SCHEMAS + ORDER_SCHEMAS + ACCESS_SCHEMAS
+    s["function"]["name"] for s in MERIT_SCHEMAS + INACTIVITY_SCHEMAS + ORDER_SCHEMAS + ACCESS_SCHEMAS
 )
 
 # ─── Tool selection ───────────────────────────────────────────────────────────
@@ -256,13 +371,18 @@ FIRE_NATION_TOOL_NAMES = frozenset(
 
 _MERIT_INTENT = re.compile(
     r"\b(merits?|bonus|award(ed|s)?|points?|deduct|dock|take away|leaderboard|ranking|top \d+"
-    r"|verify|double.?check|went through|go through|did (it|that|you)|mistake|wrong|incorrect|messed up|undo)\b",
+    r"|raids?|roblox|training|verify|double.?check|went through|go through|did (it|that|you)|mistake|wrong|incorrect|messed up|undo)\b",
     re.IGNORECASE,
 )
 # Standing orders change Bob's behaviour for everyone, so only the Owner and
 # Fire Lord are ever offered the tools that change them. The same goes for
 # deciding who Bob talks to.
 _ORDER_MIN_RANK = RANK_ORDER["second"]
+_INACTIVITY_INTENT = re.compile(
+    r"\b(inactiv\w*|kick(ed|ing)?|purge|prune|clear out|clean ?up|warn(ing|ed)?|grace|exempt|haven.?t (gained|earned)"
+    r"|no merits|without merits|dead weight)\b",
+    re.IGNORECASE,
+)
 _ACCESS_INTENT = re.compile(
     r"\b(access|talk(ing)? (to|with)|speak(ing)? (to|with)|listen(ing)? to|respond(ing)? to|repl(y|ying) to"
     r"|answer(ing)?|ignor(e|ing)|allow(ed)?|whitelist)\b",
@@ -279,6 +399,8 @@ def get_fire_nation_schemas(text: str, member, offer_all: bool = False) -> list[
         offer_all or orders.ORDER_INTENT.search(text) or orders.ORDER_LIST_INTENT.search(text)
     ):
         schemas += ORDER_SCHEMAS
+    if rank >= _ORDER_MIN_RANK and (offer_all or _INACTIVITY_INTENT.search(text)):
+        schemas += INACTIVITY_SCHEMAS
     if rank >= _ORDER_MIN_RANK and (offer_all or _ACCESS_INTENT.search(text)):
         schemas += ACCESS_SCHEMAS
     return schemas
@@ -343,6 +465,8 @@ def _not_found_note(not_found: list[str]) -> str:
 async def _award_merit(args: dict, message: discord.Message, bot, actor_rank: str) -> str:
     guild, actor = message.guild, message.author
     merit_type = str(args.get("merit_type", "")).lower()
+    if merit_type == "training":
+        merit_type = "event"  # same rules as the /addmerit training command
     usernames = args.get("usernames") if isinstance(args.get("usernames"), list) else []
     merit.assert_can_award(actor_rank, merit_type)
 
@@ -522,6 +646,130 @@ async def _verify_recent(args: dict, message: discord.Message, actor_rank: str) 
     return f"Latest {len(rows)} ledger {noun}{mine}, straight from the database:\n{lines}"
 
 
+def _names(members: list[discord.Member], limit: int = 40) -> str:
+    text = ", ".join(f"{m.display_name} ({m})" for m in members[:limit])
+    return text + (f" …and {len(members) - limit} more" if len(members) > limit else "")
+
+
+def _int(args: dict, key: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int(args.get(key) or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(low, min(high, value))
+
+
+async def _check_raid_results(bot, actor_rank: str) -> str:
+    merit.assert_can_award(actor_rank, "raid")
+    if not config.RAID_RESULTS_API_URL:
+        return "Reading raid results from the website is turned off."
+    posted = await website_raids.check_for_new_raids(bot)
+    return (
+        f"Posted {posted} new raid card{'' if posted == 1 else 's'} in the owner log channel for approval."
+        if posted else "No new raids on the website."
+    )
+
+
+async def _link_roblox_name(args: dict, message: discord.Message) -> str:
+    if not rank_at_least(message.author, "hr"):
+        raise merit.MeritError("Access Denied — HR and above only.")
+    action = str(args.get("action", "")).lower()
+    name = str(args.get("roblox_name") or "").strip()
+    if action == "list":
+        links = await website_raids.get_links()
+        if not links:
+            return "No links yet — Roblox names are matched to Discord names automatically."
+        return "\n".join(f"{n} -> <@{m}>" for n, m in sorted(links.items()))
+    if not name:
+        raise merit.MeritError("I need the Roblox username.")
+    if action == "remove":
+        return "Removed." if await website_raids.remove_link(name) else "That Roblox name wasn't linked."
+    if action == "set":
+        target = find_member(message.guild, str(args.get("username", "")))
+        if isinstance(target, str):
+            raise merit.MeritError(target)
+        if target.bot:
+            raise merit.MeritError("Bots don't earn merits.")
+        await website_raids.set_link(name, target.id, message.author.id)
+        return f"Linked — raid results for {name} now go to {target}."
+    raise merit.MeritError("action must be set, remove or list.")
+
+
+async def _inactivity(name: str, args: dict, message: discord.Message, bot) -> str:
+    if not ranks.can_manage(message.author):
+        raise merit.MeritError("Only the Owner or Fire Lord can manage inactive members.")
+    guild, actor = message.guild, message.author
+    if name == "inactivity_preview":
+        days = _int(args, "days", inactivity.DEFAULT_DAYS, 1, 365)
+        members = await inactivity.find_inactive(guild, days)
+        return (
+            f"{len(members)} member(s) have gained no merits in the last {days} days "
+            f"(bots, rank holders, the exempt list and recent joiners are left out): {_names(members) or 'none'}"
+        )
+    if name == "inactivity_warn":
+        days = _int(args, "days", inactivity.DEFAULT_DAYS, 1, 365)
+        grace = _int(args, "grace_days", inactivity.DEFAULT_GRACE_DAYS, 1, 60)
+        members = await inactivity.find_inactive(guild, days)
+        if not members:
+            return f"Nobody has gone {days} days without a merit. Nobody was warned."
+        delivered, failed = await inactivity.warn_members(guild, members, days, grace, actor)
+        await inactivity.audit(bot, "Inactivity warnings sent", delivered + failed, actor, f"Grace period {grace} days.")
+        text = f"Warned {len(delivered)} member(s) by DM; they have {grace} days to earn a merit."
+        if failed:
+            text += (
+                f" {len(failed)} have DMs closed, so they were not properly warned and won't be removed "
+                f"unless include_no_dm is used: {_names(failed)}"
+            )
+        return text
+    if name == "inactivity_status":
+        rows = await inactivity.pending_warnings(guild.id)
+        exempt = await inactivity.list_exempt(guild.id)
+        lines = [
+            f"<@{r['member_id']}> ends <t:{int(r['deadline'].timestamp())}:R>" + ("" if r["dm_delivered"] else " (DM not delivered)")
+            for r in rows[:40]
+        ]
+        return (
+            f"{len(rows)} pending warning(s): " + ("; ".join(lines) or "none")
+            + ". Exempt: " + (" ".join(f"<@{i}>" for i in exempt) or "nobody")
+        )
+    if name == "inactivity_kick":
+        days = _int(args, "days", inactivity.DEFAULT_DAYS, 1, 365)
+        due, skipped = await inactivity.due_for_removal(guild, include_undelivered=bool(args.get("include_no_dm")))
+        notes = (
+            f" Cleared as redeemed: {len(skipped['redeemed'])}. Still in grace period: {len(skipped['still_waiting'])}. "
+            f"Skipped, never got the DM: {len(skipped['no_dm'])}."
+        )
+        if not due:
+            return "Nobody is due for removal." + notes
+        removed, failed = await inactivity.remove_members(guild, due, actor, days)
+        await inactivity.audit(bot, "Inactive members removed", removed, actor)
+        text = f"Removed {len(removed)} inactive member(s): {_names(removed)}." + notes
+        if failed:
+            text += " Could not remove: " + "; ".join(f"{m} ({why})" for m, why in failed)
+        return text
+    if name == "inactivity_cancel":
+        query = str(args.get("username") or "").strip()
+        target = None
+        if query:
+            target = find_member(guild, query)
+            if isinstance(target, str):
+                raise merit.MeritError(target)
+        count = await inactivity.clear_warnings(guild.id, target.id if target else None)
+        return f"Cancelled {count} pending warning(s)."
+    if name == "inactivity_exempt":
+        target = find_member(guild, str(args.get("username", "")))
+        if isinstance(target, str):
+            raise merit.MeritError(target)
+        exempt = args.get("exempt") is not False
+        changed = await inactivity.set_exempt(guild.id, target.id, exempt, actor.id)
+        if exempt:
+            await inactivity.clear_warnings(guild.id, target.id)
+        if not changed:
+            return f"No change — {target} was already that way."
+        return f"{target} is {'now exempt from' if exempt else 'no longer exempt from'} inactivity cleanups."
+    raise merit.MeritError(f"Unknown tool {name}")
+
+
 async def _reset_merit_data(message: discord.Message, bot, actor_rank: str) -> str:
     merit.assert_can_manage_data(actor_rank)
     entries = await merit.reset_all_data(message.guild.id)
@@ -609,6 +857,12 @@ async def execute_fire_nation_tool(name: str, args: dict, ctx: dict) -> dict:
             text = await _get_merit_history(args, message, actor_rank)
         elif name == "verify_recent_merit_actions":
             text = await _verify_recent(args, message, actor_rank)
+        elif name == "check_raid_results":
+            text = await _check_raid_results(ctx["bot"], actor_rank)
+        elif name == "link_roblox_name":
+            text = await _link_roblox_name(args, message)
+        elif name.startswith("inactivity_"):
+            text = await _inactivity(name, args, message, ctx["bot"])
         elif name == "reset_merit_data":
             text = await _reset_merit_data(message, ctx["bot"], actor_rank)
         else:
